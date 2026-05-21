@@ -1,6 +1,6 @@
 # wandb
 use_wandb: true
-wandb_project: tinyworlds
+wandb_project: world_model
 
 # dataset
 dataset: ZELDA
