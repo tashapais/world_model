@@ -164,7 +164,8 @@ class LatentActionsConfig:
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
-	
+	use_windowed_attention: bool = False
+
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
 		_validate_distibuted_training(self.nproc_per_node, self.distributed)
@@ -274,6 +275,7 @@ class TrainingConfig:
 	n_updates: Optional[int] = None # number of optimizer.step(), excluding grad_accum_step
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
+	use_windowed_attention: bool = False
 	# MoE (dynamics only)
 	use_moe: bool = False
 	num_experts: int = 4
@@ -283,7 +285,7 @@ class TrainingConfig:
 	optimizer: str = "adamw"
 	muon_momentum: float = 0.95
 	muon_backend_steps: int = 5
-	
+
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
 		_validate_distibuted_training(self.nproc_per_node, self.distributed)
