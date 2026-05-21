@@ -14,6 +14,8 @@ Trained on Sonic the Hedgehog gameplay. The model learns to predict future game 
 
 ## Architecture
 
+![Architecture diagram](demo/architecture.jpeg)
+
 Three independently trained stages:
 
 1. **VideoTokenizer** — VQ-VAE that compresses frames into discrete patch tokens via a space-only transformer encoder/decoder with FSQ bottleneck
