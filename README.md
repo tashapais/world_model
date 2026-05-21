@@ -10,7 +10,7 @@ Trained on Sonic the Hedgehog gameplay. The model learns to predict future game 
 
 *Ground truth frames (top row) vs. model-predicted frames (bottom row). Generated autoregressively with no action conditioning.*
 
-![Sonic inference video](demo/inference_video_no_actions_20260521_150010.gif)
+![Sonic inference video](demo/inference_video.gif)
 
 ## Architecture
 
