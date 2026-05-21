@@ -60,6 +60,7 @@ def main():
         latent_dim=args.latent_dim,
         num_bins=args.num_bins,
         use_rope=getattr(args, 'use_rope', False),
+        use_adaln_zero=getattr(args, 'use_adaln_zero', False),
     ).to(args.device)
     if args.checkpoint:
         model, _ = load_videotokenizer_from_checkpoint(

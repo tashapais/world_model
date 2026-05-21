@@ -59,6 +59,7 @@ def main():
         n_actions=args.n_actions,
         use_windowed_attention=getattr(args, 'use_windowed_attention', False),
         use_rope=getattr(args, 'use_rope', False),
+        use_adaln_zero=getattr(args, 'use_adaln_zero', False),
     ).to(args.device)
     if args.checkpoint:
         model, _ = load_latent_actions_from_checkpoint(

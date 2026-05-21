@@ -23,6 +23,9 @@ use_interactive_mode: false # use user-inputted actions
 # MaskGIT unmasking schedule ("exp", "cosine", or "halton")
 maskgit_schedule: "exp"
 
+# AdaLN-Zero: must match the training config used for loaded checkpoints
+use_adaln_zero: false
+
 # inference acceleration
 amp: false
 tf32: false

@@ -10,13 +10,14 @@ from models.positional_encoding import build_spatial_only_pe
 
 class VideoTokenizerEncoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False):
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False, use_adaln_zero=False):
         super().__init__()
         H, W = frame_size
         grid_size = (H // patch_size, W // patch_size)
         self.patch_embed = PatchEmbedding(frame_size, patch_size, embed_dim)
         self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
-                                         use_rope=use_rope, grid_size=grid_size)
+                                         use_rope=use_rope, grid_size=grid_size,
+                                         use_adaln_zero=use_adaln_zero)
         self.latent_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, latent_dim)
@@ -49,7 +50,7 @@ class PixelShuffleFrameHead(nn.Module):
 
 class VideoTokenizerDecoder(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False):
+                 hidden_dim=256, num_blocks=4, latent_dim=5, use_rope=False, use_adaln_zero=False):
         super().__init__()
         H, W = frame_size
         self.patch_size = patch_size
@@ -59,7 +60,8 @@ class VideoTokenizerDecoder(nn.Module):
 
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
         self.transformer = STTransformer(embed_dim, num_heads, hidden_dim, num_blocks, causal=True,
-                                         use_rope=use_rope, grid_size=(self.Hp, self.Wp))
+                                         use_rope=use_rope, grid_size=(self.Hp, self.Wp),
+                                         use_adaln_zero=use_adaln_zero)
         self.frame_head = PixelShuffleFrameHead(embed_dim, patch_size=patch_size, channels=3, H=H, W=W)
 
         # spatial PE (only used when not using RoPE)
@@ -84,10 +86,10 @@ class VideoTokenizerDecoder(nn.Module):
 
 class VideoTokenizer(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=8, embed_dim=128, num_heads=8,
-                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4, use_rope=False):
+                 hidden_dim=256, num_blocks=4, latent_dim=3, num_bins=4, use_rope=False, use_adaln_zero=False):
         super().__init__()
-        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope)
-        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope)
+        self.encoder = VideoTokenizerEncoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope, use_adaln_zero=use_adaln_zero)
+        self.decoder = VideoTokenizerDecoder(frame_size, patch_size, embed_dim, num_heads, hidden_dim, num_blocks, latent_dim, use_rope=use_rope, use_adaln_zero=use_adaln_zero)
         self.quantizer = FiniteScalarQuantizer(latent_dim, num_bins)
         self.codebook_size = num_bins**latent_dim
 

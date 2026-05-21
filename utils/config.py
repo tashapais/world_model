@@ -111,6 +111,8 @@ class VideoTokenizerConfig:
 	checkpoint: Optional[str]
 	# RoPE
 	use_rope: bool = False
+	# AdaLN-Zero: pre-norm conditioning with zero-init gate (alternative to FiLM)
+	use_adaln_zero: bool = False
 	# Optimizer
 	optimizer: str = "adamw"
 	muon_momentum: float = 0.95
@@ -169,6 +171,8 @@ class LatentActionsConfig:
 	use_windowed_attention: bool = False
 	# RoPE
 	use_rope: bool = False
+	# AdaLN-Zero
+	use_adaln_zero: bool = False
 
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
@@ -220,6 +224,8 @@ class DynamicsConfig:
 	moe_aux_loss_coeff: float = 0.01
 	# RoPE
 	use_rope: bool = False
+	# AdaLN-Zero
+	use_adaln_zero: bool = False
 	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
 	# Optimizer
@@ -286,6 +292,8 @@ class TrainingConfig:
 	use_windowed_attention: bool = False
 	# RoPE
 	use_rope: bool = False
+	# AdaLN-Zero
+	use_adaln_zero: bool = False
 	# MoE (dynamics only)
 	use_moe: bool = False
 	num_experts: int = 4
@@ -326,8 +334,10 @@ class InferenceConfig:
 	compile: bool
 	# Interactive mode (user enters action ids)
 	use_interactive_mode: bool
-	# MaskGIT unmasking schedule ("exp", "halton")
+	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
+	# AdaLN-Zero: must match the training config used for loaded checkpoints
+	use_adaln_zero: bool = False
 	preload_ratio: Optional[float] = None
 
 

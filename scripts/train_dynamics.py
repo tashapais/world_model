@@ -82,6 +82,7 @@ def main():
         top_k_experts=getattr(args, 'top_k_experts', 2),
         moe_aux_loss_coeff=getattr(args, 'moe_aux_loss_coeff', 0.01),
         use_rope=getattr(args, 'use_rope', False),
+        use_adaln_zero=getattr(args, 'use_adaln_zero', False),
     ).to(args.device)
     if args.checkpoint:
         dynamics_model, _ = load_dynamics_from_checkpoint(

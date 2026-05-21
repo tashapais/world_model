@@ -55,6 +55,9 @@ use_windowed_attention: false
 # RoPE: replace additive sinusoidal PE with rotary position embeddings in all attention layers
 use_rope: false
 
+# AdaLN-Zero: pre-norm conditioning with zero-init gate (alternative to FiLM)
+use_adaln_zero: false
+
 # MoE (dynamics model only): replaces SwiGLU FFN with top-k routed experts
 use_moe: false
 num_experts: 4

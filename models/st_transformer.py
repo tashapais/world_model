@@ -5,13 +5,13 @@ from models.positional_encoding import (
     build_spatial_only_pe, sincos_time,
     rope_1d_cos_sin, rope_2d_cos_sin, apply_rope_1d, apply_rope_2d,
 )
-from models.norms import AdaptiveNormalizer
+from models.norms import AdaptiveNormalizer, AdaLNZeroNorm
 from models.patch_embed import PatchEmbedding
 import math
 import torch.nn.functional as F
 
 class SpatialAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, conditioning_dim=None, use_rope=False, grid_size=None):
+    def __init__(self, embed_dim, num_heads, conditioning_dim=None, use_rope=False, grid_size=None, use_adaln_zero=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -23,18 +23,27 @@ class SpatialAttention(nn.Module):
         self.v_proj = nn.Linear(embed_dim, embed_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
-        self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+        self.use_adaln_zero = use_adaln_zero
+        if use_adaln_zero:
+            self.norm = AdaLNZeroNorm(embed_dim, conditioning_dim)
+        else:
+            self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
         self.use_rope = use_rope
         self.grid_size = grid_size  # (Hp, Wp) required when use_rope=True
 
     def forward(self, x, conditioning=None):
         B, T, P, E = x.shape
 
+        if self.use_adaln_zero:
+            x_in, gate = self.norm(x, conditioning)  # pre-norm + conditioning params
+        else:
+            x_in = x
+
         # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*T), H, P, E/H]
         # (4 dims to work with torch compile attention)
-        q = rearrange(self.q_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
-        k = rearrange(self.k_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
-        v = rearrange(self.v_proj(x), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
+        q = rearrange(self.q_proj(x_in), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
+        k = rearrange(self.k_proj(x_in), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
+        v = rearrange(self.v_proj(x_in), 'B T P (H D) -> (B T) H P D', H=self.num_heads)
 
         if self.use_rope:
             Hp, Wp = self.grid_size
@@ -53,13 +62,15 @@ class SpatialAttention(nn.Module):
         # out proj to mix head information
         attn_out = self.out_proj(attn_output)  # [B, T, P, E]
 
-        # residual and optionally conditioned norm
-        out = self.norm(x + attn_out, conditioning) # [B, T, P, E]
-
-        return out # [B, T, P, E]
+        if self.use_adaln_zero:
+            # gated residual; gate is None when unconditioned (identity)
+            return x + (gate * attn_out if gate is not None else attn_out)  # [B, T, P, E]
+        else:
+            # residual and optionally conditioned post-norm (FiLM)
+            return self.norm(x + attn_out, conditioning)  # [B, T, P, E]
 
 class TemporalAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, causal=True, conditioning_dim=None, use_rope=False):
+    def __init__(self, embed_dim, num_heads, causal=True, conditioning_dim=None, use_rope=False, use_adaln_zero=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -71,18 +82,27 @@ class TemporalAttention(nn.Module):
         self.v_proj = nn.Linear(embed_dim, embed_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
-        self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+        self.use_adaln_zero = use_adaln_zero
+        if use_adaln_zero:
+            self.norm = AdaLNZeroNorm(embed_dim, conditioning_dim)
+        else:
+            self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
         self.causal = causal
         self.use_rope = use_rope
 
     def forward(self, x, conditioning=None):
         B, T, P, E = x.shape
 
+        if self.use_adaln_zero:
+            x_in, gate = self.norm(x, conditioning)  # pre-norm + conditioning params
+        else:
+            x_in = x
+
         # project to Q, K, V and split into heads: [B, T, P, E] -> [(B*P), H, T, D]
         # (4 dims to work with torch compile attention)
-        q = rearrange(self.q_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
-        k = rearrange(self.k_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
-        v = rearrange(self.v_proj(x), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
+        q = rearrange(self.q_proj(x_in), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
+        k = rearrange(self.k_proj(x_in), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
+        v = rearrange(self.v_proj(x_in), 'b t p (h d) -> (b p) h t d', h=self.num_heads)
 
         if self.use_rope:
             cos, sin = rope_1d_cos_sin(T, self.head_dim, x.device, x.dtype)  # [T, D]
@@ -106,26 +126,37 @@ class TemporalAttention(nn.Module):
         # out proj to mix head information
         attn_out = self.out_proj(attn_output)  # [B, T, P, E]
 
-        # residual and optionally conditioned norm
-        out = self.norm(x + attn_out, conditioning) # [B, T, P, E]
-
-        return out # [B, T, P, E]
+        if self.use_adaln_zero:
+            return x + (gate * attn_out if gate is not None else attn_out)  # [B, T, P, E]
+        else:
+            # residual and optionally conditioned post-norm (FiLM)
+            return self.norm(x + attn_out, conditioning)  # [B, T, P, E]
 
 class SwiGLUFFN(nn.Module):
     # swiglu(x) = W3(sigmoid(W1(x) + b1) * (W2(x) + b2)) + b3
-    def __init__(self, embed_dim, hidden_dim, conditioning_dim=None):
+    def __init__(self, embed_dim, hidden_dim, conditioning_dim=None, use_adaln_zero=False):
         super().__init__()
         h = math.floor(2 * hidden_dim / 3)
         self.w_v = nn.Linear(embed_dim, h)
         self.w_g = nn.Linear(embed_dim, h)
         self.w_o = nn.Linear(h, embed_dim)
-        self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+        self.use_adaln_zero = use_adaln_zero
+        if use_adaln_zero:
+            self.norm = AdaLNZeroNorm(embed_dim, conditioning_dim)
+        else:
+            self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
 
     def forward(self, x, conditioning=None):
-        v = F.silu(self.w_v(x)) # [B, T, P, h]
-        g = self.w_g(x) # [B, T, P, h]
-        out = self.w_o(v * g) # [B, T, P, E]
-        return self.norm(x + out, conditioning) # [B, T, P, E]
+        if self.use_adaln_zero:
+            x_in, gate = self.norm(x, conditioning)
+        else:
+            x_in = x
+        v = F.silu(self.w_v(x_in))  # [B, T, P, h]
+        g = self.w_g(x_in)  # [B, T, P, h]
+        out = self.w_o(v * g)  # [B, T, P, E]
+        if self.use_adaln_zero:
+            return x + (gate * out if gate is not None else out)  # [B, T, P, E]
+        return self.norm(x + out, conditioning)  # [B, T, P, E]
 
 
 class SwiGLUExpert(nn.Module):
@@ -142,7 +173,7 @@ class SwiGLUExpert(nn.Module):
 
 class MoESwiGLUFFN(nn.Module):
     def __init__(self, embed_dim, hidden_dim, num_experts=4, top_k=2,
-                 aux_loss_coeff=0.01, conditioning_dim=None):
+                 aux_loss_coeff=0.01, conditioning_dim=None, use_adaln_zero=False):
         super().__init__()
         self.num_experts = num_experts
         self.top_k = top_k
@@ -152,7 +183,11 @@ class MoESwiGLUFFN(nn.Module):
         self.experts = nn.ModuleList([
             SwiGLUExpert(embed_dim, hidden_dim) for _ in range(num_experts)
         ])
-        self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
+        self.use_adaln_zero = use_adaln_zero
+        if use_adaln_zero:
+            self.norm = AdaLNZeroNorm(embed_dim, conditioning_dim)
+        else:
+            self.norm = AdaptiveNormalizer(embed_dim, conditioning_dim)
 
         self._aux_loss = None
         self._expert_counts = None  # per-expert token fractions from last forward
@@ -172,6 +207,9 @@ class MoESwiGLUFFN(nn.Module):
         # x: [B, T, P, E]
         B, T, P, E = x.shape
         residual = x
+
+        if self.use_adaln_zero:
+            x, gate = self.norm(x, conditioning)  # pre-norm; gate applied after expert combine
 
         # flatten spatial dims for routing: [B*T*P, E]
         flat = x.reshape(-1, E)
@@ -213,24 +251,27 @@ class MoESwiGLUFFN(nn.Module):
 
         # reshape back and apply residual + norm
         out = output.reshape(B, T, P, E)
+        if self.use_adaln_zero:
+            return residual + (gate * out if gate is not None else out)  # [B, T, P, E]
         return self.norm(residual + out, conditioning)  # [B, T, P, E]
 
 class STTransformerBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, hidden_dim, causal=True, conditioning_dim=None,
                  use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
-                 use_rope=False, grid_size=None):
+                 use_rope=False, grid_size=None, use_adaln_zero=False):
         super().__init__()
-        self.spatial_attn = SpatialAttention(embed_dim, num_heads, conditioning_dim, use_rope=use_rope, grid_size=grid_size)
-        self.temporal_attn = TemporalAttention(embed_dim, num_heads, causal, conditioning_dim, use_rope=use_rope)
+        self.spatial_attn = SpatialAttention(embed_dim, num_heads, conditioning_dim, use_rope=use_rope, grid_size=grid_size, use_adaln_zero=use_adaln_zero)
+        self.temporal_attn = TemporalAttention(embed_dim, num_heads, causal, conditioning_dim, use_rope=use_rope, use_adaln_zero=use_adaln_zero)
         if use_moe:
             self.ffn = MoESwiGLUFFN(
                 embed_dim, hidden_dim,
                 num_experts=num_experts, top_k=top_k_experts,
                 aux_loss_coeff=moe_aux_loss_coeff,
                 conditioning_dim=conditioning_dim,
+                use_adaln_zero=use_adaln_zero,
             )
         else:
-            self.ffn = SwiGLUFFN(embed_dim, hidden_dim, conditioning_dim)
+            self.ffn = SwiGLUFFN(embed_dim, hidden_dim, conditioning_dim, use_adaln_zero)
 
     def forward(self, x, conditioning=None):
         # x: [B, T, P, E]
@@ -243,7 +284,7 @@ class STTransformerBlock(nn.Module):
 class STTransformer(nn.Module):
     def __init__(self, embed_dim, num_heads, hidden_dim, num_blocks, causal=True, conditioning_dim=None,
                  use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
-                 use_rope=False, grid_size=None):
+                 use_rope=False, grid_size=None, use_adaln_zero=False):
         super().__init__()
         self.use_rope = use_rope
         # temporal PE dims only needed when not using RoPE
@@ -256,6 +297,7 @@ class STTransformer(nn.Module):
                 use_moe=use_moe, num_experts=num_experts,
                 top_k_experts=top_k_experts, moe_aux_loss_coeff=moe_aux_loss_coeff,
                 use_rope=use_rope, grid_size=grid_size,
+                use_adaln_zero=use_adaln_zero,
             )
             for _ in range(num_blocks)
         ])
