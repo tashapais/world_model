@@ -1,4 +1,4 @@
-# World Model
+# Genie 3 Reconstruction
 
 A three-stage video world model: **VideoTokenizer** → **LatentActionModel** → **DynamicsModel**.
 
