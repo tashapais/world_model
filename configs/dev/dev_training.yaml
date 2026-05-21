@@ -3,14 +3,14 @@ use_wandb: true
 wandb_project: nano-genie-pipeline
 
 # dataset
-dataset: PICODOOM
+dataset: ZELDA
 fps: 30
 preload_ratio: 0.05
 
 # smaller shared model params
 patch_size: 4
 context_length: 4
-frame_size: 64
+frame_size: 128
 latent_dim: 6 # for video tokenizer
 num_bins: 2 # for video tokenizer
 n_actions: 8
@@ -18,6 +18,9 @@ embed_dim: 32
 num_heads: 4
 hidden_dim: 64
 num_blocks: 1
+
+# device
+device: CPU
 
 # simplest train settings
 compile: false
@@ -34,7 +37,15 @@ video_tokenizer_config: configs/video_tokenizer.yaml
 latent_actions_config: configs/latent_actions.yaml
 dynamics_config: configs/dynamics.yaml
 
+# distributed
+distributed:
+  use_ddp: False
+  use_fsdp: False
+  reshard_after_forward: False
+nproc_per_node: 1
+standalone: true
+
 # Which stages to run
 run_video_tokenizer: true
 run_latent_actions: true
-run_dynamics: true 
+run_dynamics: true

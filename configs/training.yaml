@@ -3,16 +3,23 @@ use_wandb: true
 wandb_project: tinyworlds
 
 # dataset
-dataset: PICODOOM
-preload_ratio: 0.005
+dataset: ZELDA
+preload_ratio: 1.0
+
+# device
+device: CUDA
 
 # shared model params
-patch_size: 4
+patch_size: 8
 context_length: 4
-frame_size: 64
+frame_size: 128
 latent_dim: 5 # for video tokenizer
 num_bins: 4 # for video tokenizer
 n_actions: 4
+
+# training
+batch_size_per_gpu: 350
+gradient_accumulation_steps: 1
 
 # performance
 amp: true

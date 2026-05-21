@@ -12,6 +12,7 @@ import torch
 class DeviceType(str, Enum):
 	CUDA: str = 'cuda'
 	CPU: str = 'cpu'
+	MPS: str = 'mps'
 
 @dataclass
 class FSDPMixedPrecisionConfig:
