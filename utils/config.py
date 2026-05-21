@@ -109,6 +109,8 @@ class VideoTokenizerConfig:
 	wandb_project: str
 	# resume from checkpoint
 	checkpoint: Optional[str]
+	# RoPE
+	use_rope: bool = False
 	# Optimizer
 	optimizer: str = "adamw"
 	muon_momentum: float = 0.95
@@ -118,7 +120,7 @@ class VideoTokenizerConfig:
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
-	
+
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
 		_validate_distibuted_training(self.nproc_per_node, self.distributed)
@@ -165,6 +167,8 @@ class LatentActionsConfig:
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
 	use_windowed_attention: bool = False
+	# RoPE
+	use_rope: bool = False
 
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)
@@ -214,7 +218,9 @@ class DynamicsConfig:
 	num_experts: int = 4
 	top_k_experts: int = 2
 	moe_aux_loss_coeff: float = 0.01
-	# MaskGIT unmasking schedule ("exp", "halton")
+	# RoPE
+	use_rope: bool = False
+	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
 	# Optimizer
 	optimizer: str = "adamw"
@@ -278,12 +284,14 @@ class TrainingConfig:
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
 	use_windowed_attention: bool = False
+	# RoPE
+	use_rope: bool = False
 	# MoE (dynamics only)
 	use_moe: bool = False
 	num_experts: int = 4
 	top_k_experts: int = 2
 	moe_aux_loss_coeff: float = 0.01
-	# MaskGIT unmasking schedule ("exp", "halton")
+	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
 	# Optimizer
 	optimizer: str = "adamw"

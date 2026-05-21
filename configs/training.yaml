@@ -52,6 +52,9 @@ muon_backend_steps: 5
 # Windowed attention in action tokenizer encoder (alternative to mean pool + concat)
 use_windowed_attention: false
 
+# RoPE: replace additive sinusoidal PE with rotary position embeddings in all attention layers
+use_rope: false
+
 # MoE (dynamics model only): replaces SwiGLU FFN with top-k routed experts
 use_moe: false
 num_experts: 4
