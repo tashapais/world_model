@@ -40,7 +40,7 @@ latent_actions_config: configs/latent_actions.yaml
 dynamics_config: configs/dynamics.yaml
 
 # which stages to run
-run_video_tokenizer: true
+run_video_tokenizer: false
 run_latent_actions: true
 run_dynamics: true
 

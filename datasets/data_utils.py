@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 from datasets.datasets import PongDataset, SonicDataset, PolePositionDataset, PicoDoomDataset, ZeldaDataset, StreetFighterDataset, TerrariaDataset, SpaceInvadersDataset, TokenizedVideoDataset
 
-DEFAULT_NUM_WORKERS = 2
-DEFAULT_PREFETCH_FACTOR = 2
-DEFAULT_PIN_MEMORY = False
+DEFAULT_NUM_WORKERS = 8
+DEFAULT_PREFETCH_FACTOR = 4
+DEFAULT_PIN_MEMORY = True
 DEFAULT_PERSISTENT_WORKERS = True
 
 
