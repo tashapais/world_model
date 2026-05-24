@@ -24,7 +24,7 @@ Three independently trained stages:
 
 ## Training/Inference Acceleration
 
-TinyWorlds supports the following torch features to accelerate training and/or inference:
+This repository supports the following torch features to accelerate training and/or inference:
 
 - **Torch compile** - allows the use of faster CUDA kernels for certain pre-optimized operations like attention and matmuls
 - **Distributed data parallel (DDP)** - enables training across multiple GPUs by running the same model on different data per GPU
