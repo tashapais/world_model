@@ -1,4 +1,6 @@
 *results*/
+!inference_results/
+!inference_results/**
 *pycache*/
 data/
 batch_visualizations/*
