@@ -1,0 +1,39 @@
+# Trained ZELDA checkpoints
+video_tokenizer_path: checkpoints/video_tokenizer
+latent_actions_path: checkpoints/latent_actions
+dynamics_path: checkpoints/dynamics
+use_latest_checkpoints: false
+
+# dataset
+dataset: ZELDA
+preload_ratio: 0.1
+
+# device
+device: cuda
+
+# inference params
+generation_steps: 10
+context_window: 2
+fps: 2
+temperature: 0.5
+teacher_forced: false
+prediction_horizon: 1
+
+# action selection (overridden per run)
+use_actions: false
+use_gt_actions: false
+use_interactive_mode: false
+
+# output directory (relative to inference_results/)
+output_subdir: zelda_trained
+
+# MaskGIT schedule
+maskgit_schedule: "exp"
+
+# must match training config
+use_adaln_zero: false
+
+# inference acceleration
+amp: false
+tf32: true
+compile: false

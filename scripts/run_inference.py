@@ -139,7 +139,7 @@ def main():
         # point is for user to be able to interact with it in real time
 
     # visualize inference
-    visualize_inference(generated_frames, ground_truth_frames, inferred_actions, args.fps, use_actions=use_latent_actions)
+    visualize_inference(generated_frames, ground_truth_frames, inferred_actions, args.fps, use_actions=use_latent_actions, output_subdir=getattr(args, 'output_subdir', None))
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ def load_models(video_tokenizer_path, latent_actions_path, dynamics_path, device
     return video_tokenizer, latent_action_model, dynamics_model
 
 
-def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions, fps, use_actions=True):
+def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions, fps, use_actions=True, output_subdir=None):
     # Move to CPU and convert to numpy
     predicted_frames = predicted_frames.detach().cpu()
     ground_truth_frames = ground_truth_frames.detach().cpu()
@@ -64,7 +64,7 @@ def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions,
     
     # Save the visualization
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    save_dir = "inference_results"
+    save_dir = os.path.join("inference_results", output_subdir) if output_subdir else "inference_results"
     os.makedirs(save_dir, exist_ok=True)
     
     if use_actions:

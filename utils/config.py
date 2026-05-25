@@ -339,6 +339,8 @@ class InferenceConfig:
 	# AdaLN-Zero: must match the training config used for loaded checkpoints
 	use_adaln_zero: bool = False
 	preload_ratio: Optional[float] = None
+	# save results to inference_results/<output_subdir>/
+	output_subdir: Optional[str] = None
 
 
 def load_config(config_cls, default_config_path: Optional[str] = None):
