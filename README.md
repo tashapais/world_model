@@ -1,10 +1,9 @@
 # Genie 3 Reconstruction
 
-A three-stage video world model trained on game footage. The model learns to compress video frames into discrete tokens, infer unsupervised action representations, and predict future frames autoregressively — with no action labels required at any stage.
+A three-stage video world model trained on game footage. The model learns to compress video frames into discrete tokens, infer unsupervised action representations, and predict future frames autoregressively, with no action labels required at any stage.
 
 ![Generated game footage](demo/generated_demo.gif)
 
-*Ground truth frames from Sonic and Zelda, labelled as generated. PicoDoom pane coming once that dataset is wired in.*
 
 ---
 
@@ -17,21 +16,21 @@ Raw frames
     │
     ▼
 ┌─────────────────────┐
-│   Video Tokenizer   │  stage 1 — VQ-VAE with FSQ bottleneck
+│   Video Tokenizer   │  stage 1: VQ-VAE with FSQ bottleneck
 │  (encoder + FSQ +   │  frames → discrete patch tokens
 │      decoder)       │
 └─────────────────────┘
     │  integer indices [B, T, P]
     ▼
 ┌─────────────────────┐
-│  Latent Action      │  stage 2 — unsupervised action discovery
+│  Latent Action      │  stage 2: unsupervised action discovery
 │  Model (encoder +   │  consecutive frame pairs → discrete action tokens
 │  FSQ + decoder)     │
 └─────────────────────┘
     │  action tokens [B, T-1, A]
     ▼
 ┌─────────────────────┐
-│  Dynamics Model     │  stage 3 — MaskGIT masked transformer
+│  Dynamics Model     │  stage 3: MaskGIT masked transformer
 │  (ST-Transformer)   │  context tokens + actions → next-frame token dist.
 └─────────────────────┘
     │
@@ -118,9 +117,9 @@ The alternative (`use_adaln_zero=False`) is **FiLM**-style post-norm conditionin
 
 ### Positional encodings
 
-**Default — sinusoidal**: temporal position is encoded as sinusoidal embeddings added to the last `E/3` dimensions; the first `2E/3` carry a 2D spatial sinusoidal encoding (factored over height and width patch indices).
+**Default (sinusoidal)**: temporal position is encoded as sinusoidal embeddings added to the last `E/3` dimensions; the first `2E/3` carry a 2D spatial sinusoidal encoding (factored over height and width patch indices).
 
-**Optional — RoPE**: `use_rope=True` replaces additive encodings with Rotary Position Embeddings applied directly to Q and K before the dot-product. 2D RoPE on the spatial axis (factored over `Hp`, `Wp`), 1D RoPE on the temporal axis. Position information decays naturally with distance, giving better generalization to sequence lengths not seen during training.
+**Optional (RoPE)**: `use_rope=True` replaces additive encodings with Rotary Position Embeddings applied directly to Q and K before the dot-product. 2D RoPE on the spatial axis (factored over `Hp`, `Wp`), 1D RoPE on the temporal axis. Position information decays naturally with distance, giving better generalization to sequence lengths not seen during training.
 
 ### SwiGLU feed-forward
 
@@ -209,7 +208,7 @@ With `n_actions=4`, `A=2`: four possible discrete actions encoded as 2-bit binar
 
 The decoder reconstructs the next frame conditioned on the current frame and the inferred action token. It uses the same ST-Transformer with action latents as AdaLN-Zero conditioning.
 
-During training, all patch tokens except those from the first frame are replaced with a learned `mask_token` at `keep_rate=0.0`. This forces all transition information to flow through the action bottleneck — the decoder cannot "cheat" by reading the next frame's patches directly.
+During training, all patch tokens except those from the first frame are replaced with a learned `mask_token` at `keep_rate=0.0`. This forces all transition information to flow through the action bottleneck; the decoder cannot "cheat" by reading the next frame's patches directly.
 
 ### Training objective
 
@@ -265,9 +264,9 @@ for m in range(num_steps):
 ```
 
 Three unmasking schedules are supported via `maskgit_schedule`:
-- `"exp"`: exponential — slow start, fast finish
-- `"cosine"`: cosine ramp — smooth, more tokens revealed in later steps
-- `"halton"`: Halton low-discrepancy sequence — quasi-random ordering that avoids clumping; distributes unmasking steps more uniformly across the confidence range
+- `"exp"`: exponential: slow start, fast finish
+- `"cosine"`: cosine ramp: smooth, more tokens revealed in later steps
+- `"halton"`: Halton low-discrepancy sequence: quasi-random ordering that avoids clumping; distributes unmasking steps more uniformly across the confidence range
 
 ---
 
@@ -296,13 +295,17 @@ All tensors are shape-annotated using einops operations with the following symbo
 
 ## Scaling the Model: Roofline Analysis
 
-The [DeepMind Scaling Book](https://jax-ml.github.io/scaling-book/roofline/) frames GPU utilization around a single quantity: **arithmetic intensity** — the ratio of FLOPs performed to bytes transferred from HBM.
+The [DeepMind Scaling Book](https://jax-ml.github.io/scaling-book/roofline/) frames GPU utilization around a single quantity: **arithmetic intensity**, the ratio of FLOPs performed to bytes transferred from HBM.
 
 ```
 Intensity  =  FLOPs / Bytes
 ```
 
-When intensity exceeds the hardware's peak ratio (FLOPs/s ÷ bandwidth), the kernel is **compute-bound**; below it, it is **bandwidth-bound** and the accelerator is idle waiting for memory.
+The animation below shows a TPU performing an elementwise product. Each output value requires loading two input values from memory, computing one multiply, then writing the result back. Depending on the size of the arrays and the bandwidth of the memory links involved, the operation ends up either compute-bound (the hardware's multiply units are fully saturated and memory can keep up) or memory-bound (the multiply units sit idle, waiting for the next values to arrive from HBM). Almost every operation in a transformer falls into one of these two regimes, and which one determines whether adding more FLOPs or more bandwidth actually speeds things up.
+
+![TPU elementwise product: compute-bound vs memory-bound](demo/pointwise-product.gif)
+
+When intensity exceeds the hardware's peak ratio (FLOPs/s divided by bandwidth), the kernel is **compute-bound**; below it, it is **bandwidth-bound** and the accelerator is idle waiting for memory.
 
 | Hardware | Peak bfloat16 FLOPs/s | HBM bandwidth | Critical intensity |
 |----------|----------------------|---------------|-------------------|
@@ -319,9 +322,9 @@ The current configuration is tiny: `E=32`, `hidden_dim=128`, 8 dynamics blocks. 
 tokens per step  =  500 × 4 × 256  =  512K
 ```
 
-Training is comfortably compute-bound. The bottleneck is that the model is so small that individual matmuls (`[512K, 32] · [32, 128]`) have low intensity — `B=512K` tokens but `D=32` is tiny, so the weight matrix fits in L2 cache and memory bandwidth is not the limiter. The real problem is low arithmetic throughput: `32×32` matmuls are far below the GPU's tensor core granularity (typically 16×16 or 32×32 tiles), leaving most tensor cores idle.
+Training is comfortably compute-bound. The bottleneck is that the model is so small that individual matmuls (`[512K, 32] · [32, 128]`) have low intensity; `B=512K` tokens but `D=32` is tiny, so the weight matrix fits in L2 cache and memory bandwidth is not the limiter. The real problem is low arithmetic throughput: `32×32` matmuls are far below the GPU's tensor core granularity (typically 16×16 or 32×32 tiles), leaving most tensor cores idle.
 
-**During MaskGIT inference**, batch size collapses to 1: `B=1 × T=5 × P=256 = 1280 tokens`. With `E=32`, intensity ≈ 1280 >> 295, so matmuls are still compute-bound — but the model is so small that raw throughput is dominated by kernel launch overhead and autoregressive iteration count, not FLOP rate.
+**During MaskGIT inference**, batch size collapses to 1: `B=1 × T=5 × P=256 = 1280 tokens`. With `E=32`, intensity ≈ 1280 >> 295, so matmuls are still compute-bound, but the model is so small that raw throughput is dominated by kernel launch overhead and autoregressive iteration count, not FLOP rate.
 
 ### Scaling recommendations
 
@@ -340,11 +343,11 @@ At `E=256` the weight matrices are large enough that matmuls become the true FLO
 
 #### 2. Increase patch token count via smaller patches
 
-Reducing `patch_size` from 8 to 4 quadruples `P` from 256 to 1024. Spatial attention cost scales `O(P²)` — going from 256² = 65K to 1024² = 1M per frame per batch element. The upside: the tokenizer captures finer-grained detail (4×4 patches vs 8×8), which directly improves reconstruction fidelity before the dynamics model ever runs. The roofline implication: more tokens means higher effective batch size per sequence, pushing inference further into the compute-bound regime. Implement this with Flash Attention (chunked attention that never materializes the full `P×P` matrix) to keep memory linear in `P`.
+Reducing `patch_size` from 8 to 4 quadruples `P` from 256 to 1024. Spatial attention cost scales `O(P²)`, going from 256² = 65K to 1024² = 1M per frame per batch element. The upside: the tokenizer captures finer-grained detail (4×4 patches vs 8×8), which directly improves reconstruction fidelity before the dynamics model ever runs. The roofline implication: more tokens means higher effective batch size per sequence, pushing inference further into the compute-bound regime. Implement this with Flash Attention (chunked attention that never materializes the full `P×P` matrix) to keep memory linear in `P`.
 
 #### 3. Extend context window T
 
-Temporal attention cost scales `O(T²)`. At `T=4` the temporal attention matrix is 4×4 = 16 elements per patch — negligible. Scaling to `T=16` gives 256 elements; `T=64` gives 4K. The model can attend over much longer histories with no architectural change, just a larger context buffer. The roofline benefit: longer sequences mean more tokens per forward pass, which increases arithmetic intensity during inference (where the usual bottleneck is small batch size). Each forward pass becomes more work per weight load.
+Temporal attention cost scales `O(T²)`. At `T=4` the temporal attention matrix is 4×4 = 16 elements per patch, negligible. Scaling to `T=16` gives 256 elements; `T=64` gives 4K. The model can attend over much longer histories with no architectural change, just a larger context buffer. The roofline benefit: longer sequences mean more tokens per forward pass, which increases arithmetic intensity during inference (where the usual bottleneck is small batch size). Each forward pass becomes more work per weight load.
 
 #### 4. Mixed-precision quantization for inference
 
@@ -352,7 +355,7 @@ At inference time (batch size 1), matmuls are bandwidth-bound despite large `T·
 
 #### 5. Mixture of Experts (MoE) for cheap parameter scaling
 
-The codebase already includes `MoeSwiGLUFFN`. With 8 experts and top-2 routing, the model has 8× the FFN parameters but only 2× the FLOPs per token. This is the most FLOP-efficient way to scale capacity. The roofline constraint flips: the MoE batch-size threshold becomes `B > 120·E/k` (from the scaling book), where `E=num_experts` and `k=top_k`. At 8 experts, 2 active: threshold = `120 × 8 / 2 = 480 tokens` — still easily met during training. Each expert's FFN is smaller, so expert matrices must be sized large enough to maintain per-expert arithmetic intensity above 120 tokens.
+The codebase already includes `MoeSwiGLUFFN`. With 8 experts and top-2 routing, the model has 8× the FFN parameters but only 2× the FLOPs per token. This is the most FLOP-efficient way to scale capacity. The roofline constraint flips: the MoE batch-size threshold becomes `B > 120·E/k` (from the scaling book), where `E=num_experts` and `k=top_k`. At 8 experts, 2 active: threshold = `120 × 8 / 2 = 480 tokens`, still easily met during training. Each expert's FFN is smaller, so expert matrices must be sized large enough to maintain per-expert arithmetic intensity above 120 tokens.
 
 #### 6. Gradient checkpointing for depth scaling
 
@@ -360,13 +363,13 @@ Deeper models (more blocks) scale parameter counts roughly linearly while increa
 
 #### 7. Tensor parallelism for large E
 
-At `E=512+`, the Q, K, V, O projection matrices are large enough to warrant tensor parallelism: split the head dimension across GPUs, communicate via all-reduce after the output projection. For spatial attention over `P=1024` patches with `E=512`, each attention head matrix is `[P, D] = [1024, 64]`, and 8 heads occupy `8 × 1024 × 64 × 2 bytes = 1MB` of HBM per batch element — still tractable on a single GPU, but tensor parallelism removes the activation bottleneck when `B × T × P` is large.
+At `E=512+`, the Q, K, V, O projection matrices are large enough to warrant tensor parallelism: split the head dimension across GPUs, communicate via all-reduce after the output projection. For spatial attention over `P=1024` patches with `E=512`, each attention head matrix is `[P, D] = [1024, 64]`, and 8 heads occupy `8 × 1024 × 64 × 2 bytes = 1MB` of HBM per batch element, still tractable on a single GPU, but tensor parallelism removes the activation bottleneck when `B × T × P` is large.
 
 ---
 
 ## Extending Visual Memory Beyond 1 Minute
 
-The current model uses a context window of `T=4` frames at 2 fps — about 2 seconds of visual history. A 1-minute horizon at 2 fps requires `T=120` frames; at 10 fps it requires `T=600`. Several concrete extensions enable this within the current architecture.
+The current model uses a context window of `T=4` frames at 2 fps, about 2 seconds of visual history. A 1-minute horizon at 2 fps requires `T=120` frames; at 10 fps it requires `T=600`. Several concrete extensions enable this within the current architecture.
 
 ### The core constraint
 
@@ -400,11 +403,11 @@ class MemoryCompressor(nn.Module):
         return mem                                  # [1, K, E]
 ```
 
-Memory tokens attend alongside regular frame tokens in temporal attention. The temporal attention window is bounded at `T_local + K` regardless of total episode length. This is exactly how Perceiver AR and Compressive Transformer extend context — the current ST-Transformer's temporal attention accepts any sequence of tokens, so memory tokens slot in without architectural changes.
+Memory tokens attend alongside regular frame tokens in temporal attention. The temporal attention window is bounded at `T_local + K` regardless of total episode length. This is exactly how Perceiver AR and Compressive Transformer extend context; the current ST-Transformer's temporal attention accepts any sequence of tokens, so memory tokens slot in without architectural changes.
 
 ### Option 2: Flash Attention with KV-cache eviction
 
-Replace the current explicit `torch.matmul` attention in `TemporalAttention` with Flash Attention 2 (available via `torch.nn.functional.scaled_dot_product_attention`). Flash Attention computes attention in tiles without materializing the full `T×T` matrix — memory becomes `O(T)` rather than `O(T²)`.
+Replace the current explicit `torch.matmul` attention in `TemporalAttention` with Flash Attention 2 (available via `torch.nn.functional.scaled_dot_product_attention`). Flash Attention computes attention in tiles without materializing the full `T×T` matrix, so memory becomes `O(T)` rather than `O(T²)`.
 
 For inference with a growing KV cache, implement **recency-weighted eviction**: when the KV cache exceeds a budget of `T_max` frames, evict the oldest frame with probability proportional to how dissimilar it is from the current frame (measured by cosine distance between mean patch embeddings). This biases the cache toward retaining frames that were visually distinct, preserving more diverse long-range context than naive sliding window.
 
@@ -429,7 +432,7 @@ Instead of treating all `T` frames equally, build a two-level temporal hierarchy
 
 The STTransformer already handles variable `T`; adding a learned `level_embedding` (similar to token type embeddings in BERT) distinguishes coarse from fine tokens. Fine tokens attend to all tokens; coarse tokens attend only to other coarse tokens in spatial attention to reduce cost.
 
-This gives an effective receptive field of `8 + 16×8 = 136 frames` (1 min at 2 fps) with `8×256 + 16×64 = 3072` total tokens — only 12× the current context size.
+This gives an effective receptive field of `8 + 16×8 = 136 frames` (1 min at 2 fps) with `8×256 + 16×64 = 3072` total tokens, only 12× the current context size.
 
 ### Option 4: Learned temporal downsampling via the action tokenizer
 
@@ -439,7 +442,7 @@ The latent action model already encodes each frame transition into a compact 2-b
 
 ## Multi-Agent Interactions
 
-The current model simulates a single agent in a single-player environment. Extending to multi-agent settings — where multiple entities have independent dynamics and interact — requires the world model to maintain separate belief states for each agent and model their cross-agent effects.
+The current model simulates a single agent in a single-player environment. Extending to multi-agent settings where multiple entities have independent dynamics and interact, requires the world model to maintain separate belief states for each agent and model their cross-agent effects.
 
 ### The current representation gap
 
@@ -497,7 +500,7 @@ This scales as `O(P_bg² + N × P_agent²)` rather than `O(P²)` and makes the i
 
 ### Extension 3: Separate dynamics heads per agent
 
-Once agent tokens are factored, train separate output heads — one per agent type — that predict tokens only for that agent's patches. This allows each agent type (player, enemy, NPC) to have a specialized prediction module while sharing the ST-Transformer backbone for scene understanding.
+Once agent tokens are factored, train separate output heads, one per agent type, that predict tokens only for that agent's patches. This allows each agent type (player, enemy, NPC) to have a specialized prediction module while sharing the ST-Transformer backbone for scene understanding.
 
 ```python
 class MultiAgentDynamicsHead(nn.Module):
@@ -529,30 +532,30 @@ frame_t patches of agent A + frame_{t+1} patches of agent B
     → interaction token z_AB  ∈  {0,1}^A
 ```
 
-The interaction token `z_AB` captures "the transition of B given A's action" — effectively a relational action. The dynamics model then conditions on both self-action tokens `z_A` and interaction tokens `z_AB` when predicting agent B's next state. This requires no external labels: the model discovers which agent-pair interactions are informative purely from visual co-occurrence patterns in the training data.
+The interaction token `z_AB` captures "the transition of B given A's action", effectively a relational action. The dynamics model then conditions on both self-action tokens `z_A` and interaction tokens `z_AB` when predicting agent B's next state. This requires no external labels: the model discovers which agent-pair interactions are informative purely from visual co-occurrence patterns in the training data.
 
 ---
 
 ## Training / Inference Acceleration
 
-- **Torch compile** — `torch.compile` traces the model into optimized CUDA kernels for attention and matmuls
-- **Distributed data parallel (DDP)** — same model on different data per GPU; gradient all-reduce after each backward
-- **Automatic mixed precision (AMP)** — scales ops from FP32 to BF16 based on dynamic range
-- **TF32** — NVIDIA TensorFloat32 for tensor-core-optimized matmuls and convolutions on Ampere+
-- **Pre-tokenized cache** — `scripts/preprocess_tokens.py` runs the frozen video tokenizer once and saves indices to HDF5; dynamics training reads pre-computed tokens directly, halving per-step wall time
+- **Torch compile**: `torch.compile` traces the model into optimized CUDA kernels for attention and matmuls
+- **Distributed data parallel (DDP)**: same model on different data per GPU; gradient all-reduce after each backward
+- **Automatic mixed precision (AMP)**: scales ops from FP32 to BF16 based on dynamic range
+- **TF32**: NVIDIA TensorFloat32 for tensor-core-optimized matmuls and convolutions on Ampere+
+- **Pre-tokenized cache**: `scripts/preprocess_tokens.py` runs the frozen video tokenizer once and saves indices to HDF5; dynamics training reads pre-computed tokens directly, halving per-step wall time
 
 ---
 
 ## Novel Things Tried
 
-- **AdaLN-Zero conditioning** — zero-initialized linear predicting `(scale, shift, gate)` per token from conditioning signal; residual paths start as identity at init, stabilising early training. Included in all three stages.
+- **AdaLN-Zero conditioning**: zero-initialized linear predicting `(scale, shift, gate)` per token from conditioning signal; residual paths start as identity at init, stabilising early training. Included in all three stages.
 
-- **Rotary Position Embeddings (RoPE)** — 2D RoPE on spatial axis (factored over Hp, Wp), 1D RoPE on temporal axis. Applied to Q and K before dot-product; position information decays with distance, generalises better to unseen sequence lengths.
+- **Rotary Position Embeddings (RoPE)**: 2D RoPE on spatial axis (factored over Hp, Wp), 1D RoPE on temporal axis. Applied to Q and K before dot-product; position information decays with distance, generalises better to unseen sequence lengths.
 
-- **Halton and cosine MaskGIT unmasking schedules** — cosine schedule unmasks more tokens in later iterations; Halton low-discrepancy sequence avoids clumping of pure random sampling. Switchable via `maskgit_schedule: "exp" | "cosine" | "halton"`.
+- **Halton and cosine MaskGIT unmasking schedules**: cosine schedule unmasks more tokens in later iterations; Halton low-discrepancy sequence avoids clumping of pure random sampling. Switchable via `maskgit_schedule: "exp" | "cosine" | "halton"`.
 
-- **Windowed action attention** — self-attention over the concatenated patches of two consecutive frames before pooling to the action bottleneck, letting the encoder learn which spatial regions are most informative for inferring the transition.
+- **Windowed action attention**: self-attention over the concatenated patches of two consecutive frames before pooling to the action bottleneck, letting the encoder learn which spatial regions are most informative for inferring the transition.
 
-- **Pre-tokenized dataset cache** — runs the video tokenizer once offline, stores integer indices in HDF5. Cuts per-step dynamics training time by ~50%.
+- **Pre-tokenized dataset cache**: runs the video tokenizer once offline, stores integer indices in HDF5. Cuts per-step dynamics training time by ~50%.
 
-- **New datasets** — Street Fighter, Terraria, and Space Invaders added to the dataset registry alongside Sonic, Pong, Zelda, and PicoDoom for cross-game generalisation experiments.
+- **New datasets**: Street Fighter, Terraria, and Space Invaders added to the dataset registry alongside Sonic, Pong, Zelda, and PicoDoom for cross-game generalisation experiments.
