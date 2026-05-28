@@ -10,8 +10,6 @@ A three-stage video world model trained on game footage. The model learns to com
 
 ## Architecture
 
-![Architecture diagram](demo/architecture.jpeg)
-
 The pipeline has three independently trained stages, each consuming the frozen outputs of the previous one:
 
 ```
