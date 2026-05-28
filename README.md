@@ -303,7 +303,7 @@ Intensity  =  FLOPs / Bytes
 
 The animation below shows a TPU performing an elementwise product. Each output value requires loading two input values from memory, computing one multiply, then writing the result back. Depending on the size of the arrays and the bandwidth of the memory links involved, the operation ends up either compute-bound (the hardware's multiply units are fully saturated and memory can keep up) or memory-bound (the multiply units sit idle, waiting for the next values to arrive from HBM). Almost every operation in a transformer falls into one of these two regimes, and which one determines whether adding more FLOPs or more bandwidth actually speeds things up.
 
-![TPU elementwise product: compute-bound vs memory-bound](demo/pointwise-product.gif)
+<img src="demo/pointwise-product.gif" width="480" alt="TPU elementwise product: compute-bound vs memory-bound">
 
 When intensity exceeds the hardware's peak ratio (FLOPs/s divided by bandwidth), the kernel is **compute-bound**; below it, it is **bandwidth-bound** and the accelerator is idle waiting for memory.
 
@@ -437,6 +437,39 @@ This gives an effective receptive field of `8 + 16×8 = 136 frames` (1 min at 2 
 ### Option 4: Learned temporal downsampling via the action tokenizer
 
 The latent action model already encodes each frame transition into a compact 2-bit vector. For long-horizon memory, store the full action sequence `[T_long, A]` (which at `A=2` is just `T_long` bits) and use it to re-synthesize approximate frame tokens on demand. The dynamics model can condition on reconstructed-from-actions tokens for distant frames and on exact observed tokens for recent frames. This is lossless for the action channel and gracefully lossy for the visual channel over long time horizons.
+
+### Option 5: Ring Attention for multi-device context scaling
+
+[Ring Attention](https://coconut-mode.com/posts/ring-attention/) removes the sequence-length memory ceiling entirely by distributing the KV cache across a ring of devices, letting each device hold only `1/N` of the full context. It is the cleanest solution to long-context scaling once the model is large enough to warrant multi-GPU inference.
+
+**How it works.** Standard attention requires materializing the full `T×T` score matrix in HBM. For our temporal attention over `T` frames with `P` patches each, that matrix is `[(B×P), H, T, T]`, which grows quadratically with `T`. Ring Attention restructures the computation so that each of `N` devices holds one chunk `Q_i` of the query sequence and one chunk `K_j, V_j` of the key-value sequence, then rotates the KV blocks around the ring:
+
+```
+Device 0: holds Q_0, K_0/V_0  →  sends K_0/V_0 to Device 1
+Device 1: holds Q_1, K_1/V_1  →  sends K_1/V_1 to Device 2
+...
+Device N-1: holds Q_{N-1}, K_{N-1}/V_{N-1}  →  sends to Device 0
+
+After N rotation steps, every device has seen every K/V chunk
+and accumulated its partial output sum.
+```
+
+Each device accumulates its output using an online softmax recurrence that never requires all keys and values simultaneously:
+
+```
+# At step j, device i updates its running output for Q_i:
+m_{j+1} = max(m_j,  max(Q_i @ K_{j+1}.T))          # running max for numerical stability
+A_{j+1} = A_j * exp(m_j - m_{j+1}) + exp(Q_i @ K_{j+1}.T - m_{j+1}) @ V_{j+1}
+l_{j+1} = l_j * exp(m_j - m_{j+1}) + sum(exp(Q_i @ K_{j+1}.T - m_{j+1}))
+
+# Final output for Q_i: A_{N} / l_{N}
+```
+
+The communication (sending `K_j, V_j` to the next device) is overlapped with the local computation, so there is zero latency overhead when the sequence chunk is large enough: the condition is `s/N >= FLOPs/s / Bandwidth`, i.e. the per-device sequence length must exceed the hardware's compute-to-bandwidth ratio (~295 for H100).
+
+**Memory per device** is `O(s/N)` rather than `O(s)`, and because Ring Attention is orthogonal to Flash Attention, the two compose: Flash Attention handles the within-chunk tiling to avoid materializing even the local `(s/N)×(s/N)` block, while Ring Attention handles the across-device distribution.
+
+**Applied to this model.** The `TemporalAttention` module currently computes attention over all `T` timesteps on a single device. To add Ring Attention, replace the `torch.matmul(q, k_t)` block with a ring-distributed loop that rotates `k` and `v` tensors across `N` GPUs while accumulating the output sum locally. At `T=600` frames (1 min at 10 fps) across 8 GPUs, each device processes `T/8 = 75` frames, keeping temporal attention memory at `(B×P) × H × 75 × 75 × 2 bytes` per layer, which is fully tractable. The causal mask is handled by the Striped Attention variant, which redistributes tokens so that each device always has a balanced mix of early and late positions rather than leaving half the devices idle on the triangular-masked portion.
 
 ---
 
