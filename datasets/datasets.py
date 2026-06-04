@@ -233,12 +233,16 @@ class PicoDoomDataset(VideoHDF5Dataset):
         )
 
 class ZeldaDataset(VideoHDF5Dataset):
-    def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=4, resolution=(128, 128), fps=15, preload_ratio=0.2):
+    # disable_test_split=False holds out the last 10% of frames as a real
+    # validation split (train -> first 90%, val -> last 10%), so val metrics
+    # measure generalization instead of echoing the training loss.
+    def __init__(self, video_path, transform=None, save_path=None, train=True, num_frames=4, resolution=(128, 128), fps=15, preload_ratio=0.2, disable_test_split=False):
         super().__init__(
             video_path=video_path,
             transform=transform,
             save_path=save_path,
             train=train,
+            disable_test_split=disable_test_split,
             num_frames=num_frames,
             resize_to=resolution,
             fps=fps,

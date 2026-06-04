@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw
 from utils.utils import load_videotokenizer_from_checkpoint, load_latent_actions_from_checkpoint, load_dynamics_from_checkpoint
 from einops import repeat
 
@@ -79,9 +80,9 @@ def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions,
     
     print(f"Visualization saved to: {save_path}")
 
-    all_frames = torch.cat([ground_truth_frames, predicted_frames], dim=1)
-    save_frames_as_mp4(all_frames, mp4_path, fps)
-    
+    gif_path = mp4_path.replace(".mp4", ".gif")
+    save_side_by_side_videos(ground_truth_frames, predicted_frames, mp4_path, gif_path, fps)
+
     # Calculate and display reconstruction error
     mse_error = torch.mean((predicted_frames - ground_truth_frames) ** 2).item()
     print(f"\nInference stats:")
@@ -93,7 +94,6 @@ def visualize_inference(predicted_frames, ground_truth_frames, inferred_actions,
         print(f"No actions used.")
 
 
-# TODO: get working mp4
 def save_frames_as_mp4(frames, output_path, fps=2):
     B, T, C, H, W = frames.shape
 
@@ -119,9 +119,114 @@ def save_frames_as_mp4(frames, output_path, fps=2):
     print(f"MP4 video saved to: {output_path}")
 
 
+def save_frames_as_gif(frames, output_path, fps=2):
+    B, T, C, H, W = frames.shape
+    duration = int(1000 / fps)
+
+    pil_frames = []
+    for i in range(T):
+        frame = frames[0, i].detach().cpu().permute(1, 2, 0).numpy()
+        frame = np.clip(frame, 0, 1)
+        frame = (frame * 255).astype(np.uint8)
+        if frame.shape[2] == 1:
+            frame = np.repeat(frame, 3, axis=2)
+        pil_frames.append(Image.fromarray(frame))
+
+    pil_frames[0].save(
+        output_path,
+        save_all=True,
+        append_images=pil_frames[1:],
+        duration=duration,
+        loop=0,
+    )
+    print(f"GIF saved to: {output_path}")
+
+
+def save_side_by_side_videos(gt_frames, pred_frames, mp4_path, gif_path, fps=2):
+    """Side-by-side comparison: GT on the left, generated on the right, playing in sync."""
+    _, T_gt, C, H, W = gt_frames.shape
+    _, T_pred, _, _, _ = pred_frames.shape
+    T = min(T_gt, T_pred)
+
+    gap = 4        # separator width in pixels
+    label_h = 16   # height of the label bar
+
+    # Build a reusable label banner
+    total_w = W * 2 + gap
+    label_img = Image.new("RGB", (total_w, label_h), (20, 20, 20))
+    draw = ImageDraw.Draw(label_img)
+    draw.text((4, 3), "Ground Truth", fill=(80, 220, 80))
+    draw.text((W + gap + 4, 3), "Generated", fill=(220, 80, 80))
+    label_np = np.array(label_img)
+
+    pil_frames = []
+    for i in range(T):
+        gt_np = (np.clip(gt_frames[0, i].permute(1, 2, 0).numpy(), 0, 1) * 255).astype(np.uint8)
+        pred_np = (np.clip(pred_frames[0, i].permute(1, 2, 0).numpy(), 0, 1) * 255).astype(np.uint8)
+        if gt_np.shape[2] == 1:
+            gt_np = np.repeat(gt_np, 3, axis=2)
+        if pred_np.shape[2] == 1:
+            pred_np = np.repeat(pred_np, 3, axis=2)
+        sep = np.full((H, gap, 3), 60, dtype=np.uint8)
+        body = np.concatenate([gt_np, sep, pred_np], axis=1)
+        combined = np.concatenate([label_np, body], axis=0)
+        pil_frames.append(Image.fromarray(combined))
+
+    # GIF
+    duration = int(1000 / fps)
+    pil_frames[0].save(gif_path, save_all=True, append_images=pil_frames[1:], duration=duration, loop=0)
+    print(f"Side-by-side GIF saved to: {gif_path}")
+
+    # MP4 — avc1 requires even dimensions
+    frame_h, frame_w = label_h + H, total_w
+    out_h = frame_h + (frame_h % 2)
+    out_w = frame_w + (frame_w % 2)
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    out = cv2.VideoWriter(mp4_path, fourcc, fps, (out_w, out_h))
+    for pil_frame in pil_frames:
+        frame_np = np.array(pil_frame)
+        if out_h != frame_h or out_w != frame_w:
+            padded = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+            padded[:frame_h, :frame_w] = frame_np
+            frame_np = padded
+        out.write(cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR))
+    out.release()
+    print(f"Side-by-side MP4 saved to: {mp4_path}")
+
+
 def sample_random_action(n_actions):
     random_action = torch.randint(0, n_actions, (1,))
     return random_action
+
+
+def build_action_latent_from_index(action_index, inferred_actions, context_frames,
+                                   latent_action_model, context_window, prediction_horizon, device):
+    """Build the dynamics conditioning latent for an explicitly chosen action index.
+
+    This is the same construction used by the interactive branch of `get_action_latent`,
+    factored out so callers (e.g. the real-time `play.py` loop) can drive it directly with
+    a key-selected action instead of blocking on `input()`.
+
+    Appends the chosen action to `inferred_actions` (mutated in place) and returns the
+    conditioning latent of shape [1, S, A] aligned to the dynamics input sequence.
+    """
+    sampled_action_index = torch.tensor([int(action_index)], device=device)
+    inferred_actions.append(sampled_action_index)
+
+    recent = inferred_actions[-context_window:] if len(inferred_actions) > context_window else inferred_actions
+    recent_tensor = repeat(torch.tensor([a.item() for a in recent], device=device), 'i -> 1 i')  # [1, len(recent)]
+    action_latent = latent_action_model.quantizer.get_latents_from_indices(recent_tensor)  # [1, len(recent), A]
+
+    if prediction_horizon > 1:
+        action_latent = repeat(action_latent, 'b 1 a -> b ph a', ph=prediction_horizon)
+
+    if len(recent) < context_window:
+        # pad the front with ground-truth-inferred actions so the conditioning spans the context window
+        gt_pad_actions = latent_action_model.encode(context_frames[:, :context_window - len(recent) + 1])
+        quantized_gt_pad_actions = latent_action_model.quantizer(gt_pad_actions)
+        action_latent = torch.cat([quantized_gt_pad_actions, action_latent], dim=1)  # [1, S, A]
+
+    return sampled_action_index, action_latent
 
 
 def get_action_latent(args, inferred_actions, n_actions, context_frames, latent_action_model, step):
@@ -130,20 +235,9 @@ def get_action_latent(args, inferred_actions, n_actions, context_frames, latent_
         user_input = input(f"Enter action id [0..{n_actions-1}] for step {step+1}: ").strip()
 
         assert user_input.isdigit() and 0 <= int(user_input) < n_actions, f"Invalid input. Please enter an integer in [0,{n_actions-1}]"
-        val = int(user_input)
-        sampled_action_index = torch.tensor([val], device=args.device)
-
-        inferred_actions.append(sampled_action_index)
-        recent = inferred_actions[-args.context_window:] if len(inferred_actions) > args.context_window else inferred_actions
-        recent_tensor = repeat(torch.tensor(recent, device=args.device), 'i -> 1 i') # [1, i or T_ctx]
-        action_latent = latent_action_model.quantizer.get_latents_from_indices(recent_tensor)
-        
-        if args.prediction_horizon > 1:
-            action_latent = repeat(action_latent, 'b 1 a -> b ph a', ph=args.prediction_horizon)
-        if len(recent) < args.context_window:
-            gt_pad_actions = latent_action_model.encode(context_frames[:, :args.context_window - len(recent) + 1])
-            quantized_gt_pad_actions = latent_action_model.quantizer(gt_pad_actions)
-            action_latent = torch.cat([quantized_gt_pad_actions, action_latent], dim=1)
+        sampled_action_index, action_latent = build_action_latent_from_index(
+            int(user_input), inferred_actions, context_frames, latent_action_model,
+            args.context_window, args.prediction_horizon, args.device)
     elif args.use_gt_actions: # use action tokenizer actions
         print("using gt actions")
         gt_action_latents = latent_action_model.encode(context_frames) # [1, T - 1, A]

@@ -13,7 +13,7 @@ device: cuda
 
 # inference params
 generation_steps: 10
-context_window: 2
+context_window: 4
 fps: 2
 temperature: 0.5
 teacher_forced: false

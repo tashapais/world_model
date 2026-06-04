@@ -125,7 +125,7 @@ def main():
 
     # init wandb
     if args.use_wandb and is_main:
-        run_name = f"dynamics_{readable_timestamp()}"
+        run_name = f"dynamics_p{args.patch_size}_l{args.latent_dim}_b{args.num_bins}_{args.n_updates//1000}k_{args.dataset.lower()}_{readable_timestamp()}"
         init_wandb(args.wandb_project, asdict(args), run_name)
 
     unwrap_model(dynamics_model).train()

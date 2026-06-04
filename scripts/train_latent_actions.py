@@ -100,7 +100,7 @@ def main():
     if args.use_wandb and is_main:
         cfg = asdict(args)
         cfg.update({'timestamp': timestamp})
-        run_name = f"latent_actions_{timestamp}"
+        run_name = f"latent_actions_p{args.patch_size}_{args.dataset.lower()}_{timestamp}"
         init_wandb(args.wandb_project, cfg, run_name)
 
     unwrap_model(model).train()

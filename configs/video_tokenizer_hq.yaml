@@ -1,10 +1,12 @@
 # Scaled-up video tokenizer for high-quality ZELDA runs on a single A100 80GB.
 #
 # Capacity vs the baseline configs/video_tokenizer.yaml:
-#   embed_dim   32 -> 256   (8x wider)
-#   hidden_dim 128 -> 1024  (8x wider FFN)
-#   num_blocks   4 -> 6     (deeper enc + dec)
-#   ~0.15M params -> ~12.7M params  (codebook stays 262k from the patch4 config)
+#   embed_dim   32 -> 384   (12x wider)
+#   hidden_dim 128 -> 1536  (12x wider FFN)
+#   num_blocks   4 -> 8     (deeper enc + dec)
+#   ~0.15M params -> ~37.9M params  (codebook stays 262k from the patch4 config)
+# 37.9M is well-supported by the ~72k-frame Zelda set; if val recon diverges
+# from train recon, step back to embed_dim=256 / hidden_dim=1024 / num_blocks=6.
 #
 # What lives where (see utils/config.load_stage_config_merged):
 #   - Model width/depth (embed_dim, num_heads, hidden_dim, num_blocks) come from
@@ -33,10 +35,10 @@ learning_rate: 0.0005
 log_interval: 2500
 
 # Model (scaled up) -- these are the values that actually take effect
-embed_dim: 256
-num_heads: 8
-hidden_dim: 1024
-num_blocks: 6
+embed_dim: 384
+num_heads: 8       # head_dim = 384 / 8 = 48
+hidden_dim: 1536
+num_blocks: 8
 
 # resume from checkpoint
 checkpoint:

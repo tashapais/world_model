@@ -101,7 +101,7 @@ def main():
     if args.use_wandb and is_main:
         cfg = asdict(args)
         cfg.update({'timestamp': timestamp})
-        run_name = f"video_tokenizer_{timestamp}"
+        run_name = f"video_tokenizer_p{args.patch_size}_l{args.latent_dim}_b{args.num_bins}_{args.dataset.lower()}_{timestamp}"
         init_wandb(args.wandb_project, cfg, run_name)
 
     unwrap_model(model).train()
@@ -160,6 +160,27 @@ def main():
                 codebook_usage = unique_codes / unwrap_model(model).codebook_size
                 if is_main:
                     wandb.log({'train/codebook_usage': codebook_usage}, step=i)
+
+            # held-out validation reconstruction loss (ZeldaDataset reserves the
+            # last 10% of frames; see disable_test_split). Capped at 20 batches so
+            # logging stays cheap. .float() copies the scalar out of any reused
+            # cudagraph buffer before the next forward overwrites it.
+            unwrap_model(model).eval()
+            val_losses = []
+            with torch.no_grad():
+                for vb, (xv, _) in enumerate(validation_loader):
+                    if vb >= 20:
+                        break
+                    xv = xv.to(args.device, non_blocking=True)
+                    with train_ctx:
+                        vloss, _ = model(xv)
+                    val_losses.append(vloss.detach().float())
+            unwrap_model(model).train()
+            if val_losses and is_main:
+                val_loss = torch.mean(torch.stack(val_losses)).item()
+                if args.use_wandb:
+                    wandb.log({'val/loss': val_loss}, step=i)
+                print(f'  Step {i} Val recon loss: {val_loss:.6f}')
 
             hyperparameters = args.__dict__
             save_training_state(model, optimizers[0], schedulers[0], hyperparameters, checkpoints_dir, prefix='video_tokenizer', step=i)
