@@ -16,7 +16,12 @@ latent_dim: 6
 num_bins: 8
 n_actions: 4
 
-batch_size_per_gpu: 350
+# Global batch for all three stages (overrides each stage config's value).
+# 64 is a safe starting point for the 38M tokenizer at patch4 (4096 tokens/sample)
+# on a 32GB RTX 5090. Ramp toward 96/128 while watching `nvidia-smi`; n_updates is
+# step-based, not epoch-based, so a smaller batch does NOT lengthen training.
+# 350 was tuned for the old 0.15M tokenizer and will OOM at 38M on 32GB.
+batch_size_per_gpu: 64
 gradient_accumulation_steps: 1
 
 amp: true
