@@ -1,0 +1,42 @@
+# Scaled-up video tokenizer for high-quality ZELDA runs on a single A100 80GB.
+#
+# Capacity vs the baseline configs/video_tokenizer.yaml:
+#   embed_dim   32 -> 256   (8x wider)
+#   hidden_dim 128 -> 1024  (8x wider FFN)
+#   num_blocks   4 -> 6     (deeper enc + dec)
+#   ~0.15M params -> ~12.7M params  (codebook stays 262k from the patch4 config)
+#
+# What lives where (see utils/config.load_stage_config_merged):
+#   - Model width/depth (embed_dim, num_heads, hidden_dim, num_blocks) come from
+#     THIS file. The training config leaves them unset, so these take effect.
+#   - patch_size / latent_dim / num_bins / frame_size come from the training
+#     config (configs/training_patch4_hq.yaml: patch_size=4, 262k codebook).
+#   - batch_size_per_gpu, n_updates, learning_rate below are OVERRIDDEN whenever
+#     the training config sets them, because train_video_tokenizer.py always
+#     merges --training_config and the training config wins. They act as
+#     fallbacks only. To actually change the tokenizer's batch, edit
+#     batch_size_per_gpu in configs/training_patch4_hq.yaml (note: that value is
+#     global to all three stages, so raise it watching dynamics memory too).
+#
+# Run (tokenizer -> latent actions -> dynamics):
+#   python scripts/full_train.py --config configs/training_patch4_hq.yaml
+# Or just the tokenizer stage:
+#   python scripts/train_video_tokenizer.py \
+#       --config configs/video_tokenizer_hq.yaml \
+#       --training_config configs/training_patch4_hq.yaml
+
+# Training (fallbacks; effective values come from configs/training_patch4_hq.yaml)
+batch_size_per_gpu: 256
+gradient_accumulation_steps: 1
+n_updates: 50000
+learning_rate: 0.0005
+log_interval: 2500
+
+# Model (scaled up) -- these are the values that actually take effect
+embed_dim: 256
+num_heads: 8
+hidden_dim: 1024
+num_blocks: 6
+
+# resume from checkpoint
+checkpoint:
