@@ -1,0 +1,52 @@
+# High-quality ZELDA run: patch_size=4 for 4x finer token resolution,
+# latent_dim=6 + num_bins=8 for a 262k-entry codebook vs the previous 256.
+use_wandb: true
+wandb_project: world_model
+
+dataset: ZELDA
+preload_ratio: 1.0
+
+device: CUDA
+
+# key architectural changes vs baseline
+patch_size: 4
+context_length: 4
+frame_size: 128
+latent_dim: 6
+num_bins: 8
+n_actions: 4
+
+batch_size_per_gpu: 350
+gradient_accumulation_steps: 1
+
+amp: true
+tf32: true
+compile: true
+
+distributed:
+  use_ddp: False
+  use_fsdp: False
+  reshard_after_forward: False
+nproc_per_node: 1
+standalone: true
+
+video_tokenizer_config: configs/video_tokenizer_hq.yaml
+latent_actions_config: configs/latent_actions.yaml
+dynamics_config: configs/dynamics_30k.yaml
+
+run_video_tokenizer: true
+run_latent_actions: true
+run_dynamics: true
+
+optimizer: adamw
+muon_momentum: 0.95
+muon_backend_steps: 5
+
+use_windowed_attention: false
+use_rope: false
+use_adaln_zero: false
+use_moe: false
+num_experts: 4
+top_k_experts: 2
+moe_aux_loss_coeff: 0.01
+maskgit_schedule: "exp"
