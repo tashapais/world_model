@@ -45,18 +45,38 @@ HUD_H = 54  # height of the on-screen text bar
 WINDOW = "world model (arrow keys to act | r reset | q quit)"
 
 # Arrow keys aren't ASCII, so we read them with cv2.waitKeyEx() (full key code,
-# no 0xFF mask) and match the platform-specific codes below. Requested mapping:
-#   up = 0, down = 1, left = 2, right = 3
+# no 0xFF mask) and match the platform-specific codes below to a *direction*.
 # Codes differ per backend: GTK/Qt on Linux, Cocoa on macOS, Win32 on Windows.
-ARROW_TO_ACTION = {
-    65362: 0, 63232: 0, 2490368: 0,   # up
-    65364: 1, 63233: 1, 2621440: 1,   # down
-    65361: 2, 63234: 2, 2424832: 2,   # left
-    65363: 3, 63235: 3, 2555904: 3,   # right
+ARROW_TO_DIRECTION = {
+    65362: "up",    63232: "up",    2490368: "up",
+    65364: "down",  63233: "down",  2621440: "down",
+    65361: "left",  63234: "left",  2424832: "left",
+    65363: "right", 63235: "right", 2555904: "right",
 }
 
-# w/a/s/d fallback for the same four codes (matched on the ASCII low byte)
-KEY_TO_ACTION = {ord("w"): 0, ord("a"): 1, ord("s"): 2, ord("d"): 3}
+# w/a/s/d fallback for the same directions (matched on the ASCII low byte)
+KEY_TO_DIRECTION = {ord("w"): "up", ord("a"): "left", ord("s"): "down", ord("d"): "right"}
+
+# Which action code each direction maps to. Defaults to a raw 1:1 binding, but is
+# overridden by configs/action_calibration.json (written by scripts/calibrate_actions.py),
+# which measures what each unsupervised code actually does and binds the arrows to
+# the codes whose motion best matches each direction.
+DEFAULT_DIRECTION_TO_CODE = {"up": 0, "down": 1, "left": 2, "right": 3}
+CALIBRATION_PATH = os.path.join("configs", "action_calibration.json")
+
+
+def load_direction_to_code():
+    """Return (direction->code dict, calibrated?). Falls back to the raw binding."""
+    import json
+    if os.path.exists(CALIBRATION_PATH):
+        try:
+            with open(CALIBRATION_PATH) as f:
+                mapping = json.load(f).get("mapping", {})
+            d2c = {d: int(mapping.get(d, DEFAULT_DIRECTION_TO_CODE[d])) for d in DEFAULT_DIRECTION_TO_CODE}
+            return d2c, True
+        except Exception as e:
+            print(f"[play] could not read {CALIBRATION_PATH} ({e}); using raw binding")
+    return dict(DEFAULT_DIRECTION_TO_CODE), False
 
 
 def pick_device(requested: str) -> torch.device:
@@ -185,6 +205,9 @@ def main():
         ctx = random_context_clip(data_loader, args.context_window, device)
         return ctx, ctx.clone(), []  # context window, full rollout, action history
 
+    direction_to_code, calibrated = load_direction_to_code()
+    print(f"Arrow -> action-code mapping ({'calibrated' if calibrated else 'raw/uncalibrated'}): {direction_to_code}")
+
     context_frames, generated, inferred_actions = new_episode()
     last_action = None
     frame_no = args.context_window
@@ -199,8 +222,9 @@ def main():
         key = cv2.waitKeyEx(0)
         ascii_key = key & 0xFF
 
-        if key in ARROW_TO_ACTION:
-            action = ARROW_TO_ACTION[key]
+        direction = ARROW_TO_DIRECTION.get(key) or KEY_TO_DIRECTION.get(ascii_key)
+        if direction is not None:
+            action = direction_to_code[direction]
         elif ascii_key in (ord("q"), 27):  # q or ESC
             break
         elif ascii_key == ord("r"):
@@ -209,10 +233,8 @@ def main():
             continue
         elif ascii_key == ord(" "):
             action = last_action if last_action is not None else 0
-        elif ascii_key in KEY_TO_ACTION:
-            action = KEY_TO_ACTION[ascii_key]
         elif ord("0") <= ascii_key <= ord("9"):
-            action = ascii_key - ord("0")
+            action = ascii_key - ord("0")  # raw code by number, for probing
         else:
             continue  # ignore unmapped keys
 

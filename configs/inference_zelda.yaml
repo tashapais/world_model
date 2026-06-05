@@ -1,7 +1,12 @@
 # Trained ZELDA checkpoints
-video_tokenizer_path: checkpoints/video_tokenizer
-latent_actions_path: checkpoints/latent_actions
-dynamics_path: checkpoints/dynamics
+# Explicit committed checkpoints so `python -m scripts.play` works on a fresh
+# clone without relying on find_latest_checkpoint (which sorts by ctime and is
+# unreliable when every file shares the git-checkout time).
+# Tokenizer reused from the original run; latent-actions + dynamics are the
+# action-retrain run (8 codes, target-frame-only masking).
+video_tokenizer_path: results/2026_06_05_00_58_45/video_tokenizer/checkpoints/video_tokenizer_step_47500
+latent_actions_path: results/2026_06_05_20_01_36_actions/latent_actions/checkpoints/latent_actions_step_14500
+dynamics_path: results/2026_06_05_20_01_36_actions/dynamics/checkpoints/dynamics_step_29000
 use_latest_checkpoints: false
 
 # dataset
