@@ -34,11 +34,26 @@ n_updates: 50000
 learning_rate: 0.0005
 log_interval: 2500
 
-# Model (scaled up) -- these are the values that actually take effect
-embed_dim: 384
-num_heads: 8       # head_dim = 384 / 8 = 48
-hidden_dim: 1536
-num_blocks: 8
+# Model -- these are the values that actually take effect.
+# Sized for a 32GB RTX 5090 at patch2/64x64 (1024 tokens/frame): the 384/1536/8
+# "38M" config OOMs even at batch 8 here (FFN activations across 16 ST-blocks at
+# 1024 tokens), so we use the config's own documented fallback. At ~12.7M params
+# this is still ~85x the 0.15M baseline; fidelity comes mainly from patch2 + the
+# 4096 codebook + LPIPS, not raw width. Compiled footprint: B=16 -> 11.3GB.
+embed_dim: 256
+num_heads: 8       # head_dim = 256 / 8 = 32
+hidden_dim: 1024
+num_blocks: 6
+
+# Fidelity additions (see models/video_tokenizer.py):
+#  - lpips_weight: perceptual loss term restores high-frequency sharpness that
+#    pure smooth_l1 averages away (the blur seen in the recon-ceiling diagnostic).
+#    0.5-1.0 is a typical VGG-LPIPS weight alongside an L1/Huber recon term.
+#  - use_conv_refiner: full-res 3x3 conv stack on the decode head that mixes
+#    across patch boundaries to kill per-patch grid seams.
+lpips_weight: 1.0
+lpips_net: vgg
+use_conv_refiner: true
 
 # resume from checkpoint
 checkpoint:

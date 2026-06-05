@@ -95,9 +95,9 @@ def main():
     # optional DDP, compile, param count, tf32
     print_param_count_if_main(dynamics_model, "DynamicsModel", is_main)
     if args.compile:
-        video_tokenizer = torch.compile(video_tokenizer, mode="reduce-overhead", fullgraph=False, dynamic=True)
-        latent_action_model = torch.compile(latent_action_model, mode="reduce-overhead", fullgraph=False, dynamic=True)
-        dynamics_model = torch.compile(dynamics_model, mode="reduce-overhead", fullgraph=False, dynamic=True)
+        video_tokenizer = torch.compile(video_tokenizer, mode="reduce-overhead", fullgraph=False, dynamic=False)
+        latent_action_model = torch.compile(latent_action_model, mode="reduce-overhead", fullgraph=False, dynamic=False)
+        dynamics_model = torch.compile(dynamics_model, mode="reduce-overhead", fullgraph=False, dynamic=False)
         print("Compiled all models for training.")
     dynamics_model = prepare_model_for_distributed(
         dynamics_model, 
@@ -152,6 +152,8 @@ def main():
             data_overrides['fps'] = args.fps
         if hasattr(args, 'preload_ratio') and args.preload_ratio is not None:
             data_overrides['preload_ratio'] = args.preload_ratio
+        if hasattr(args, 'frame_size') and args.frame_size is not None:
+            data_overrides['resolution'] = (args.frame_size, args.frame_size)
         _, _, training_loader, _, _ = load_data_and_data_loaders(
             dataset=args.dataset,
             batch_size=args.batch_size_per_gpu,

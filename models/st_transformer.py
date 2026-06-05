@@ -51,12 +51,10 @@ class SpatialAttention(nn.Module):
             q = apply_rope_2d(q, cos, sin)
             k = apply_rope_2d(k, cos, sin)
 
-        k_t = k.transpose(-2, -1) # [(B*T), H, P, D, P]
-
-        # attention(q, k, v) = softmax(qk^T / sqrt(d)) v
-        scores = torch.matmul(q, k_t) / math.sqrt(self.head_dim) # [(B*T), H, P, P]
-        attn_weights = F.softmax(scores, dim=-1) # [(B*T), H, P, P]
-        attn_output = torch.matmul(attn_weights, v) # [(B*T), H, P, D]
+        # fused SDPA (flash) avoids materializing the [(B*T), H, P, P] score matrix;
+        # default scale is 1/sqrt(head_dim), matching the manual version. Spatial
+        # attention is non-causal (patches attend to all patches in the frame).
+        attn_output = F.scaled_dot_product_attention(q, k, v) # [(B*T), H, P, D]
         attn_output = rearrange(attn_output, '(B T) H P D -> B T P (H D)', B=B, T=T) # [B, T, P, E]
 
         # out proj to mix head information
@@ -109,9 +107,12 @@ class TemporalAttention(nn.Module):
             q = apply_rope_1d(q, cos, sin)
             k = apply_rope_1d(k, cos, sin)
 
-        k_t = k.transpose(-2, -1) # [(B*P), H, T, D, T]
-
-        # attention(q, k, v) = softmax(qk^T / sqrt(d)) v
+        # NOTE: temporal attention collapses to batch (B*P), which for large P (e.g.
+        # 1024 patches * batch 64 = 65536) exceeds CUDA's 65535 grid-dim limit and
+        # makes the flash SDPA kernel fail with "invalid configuration argument".
+        # The score matrix here is only [B*P, H, T, T] with T=4 (tiny), so the manual
+        # path costs almost nothing -- keep it manual rather than risk the grid limit.
+        k_t = k.transpose(-2, -1) # [(B*P), H, D, T]
         scores = torch.matmul(q, k_t) / math.sqrt(self.head_dim) # [(B*P), H, T, T]
 
         # causal mask for each token t in seq, mask out all tokens to the right of t (after t)

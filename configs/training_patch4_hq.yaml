@@ -9,19 +9,27 @@ preload_ratio: 1.0
 device: CUDA
 
 # key architectural changes vs baseline
-patch_size: 4
+# patch2 @ 64x64: 1024 tokens/frame (same dynamics budget as patch4@128) but each
+# token covers only a 2x2 pixel block -> sharpest per-token reconstruction, which
+# is what the patch-size comparison favored over coarser patches. The 128x128 cache
+# is downsampled to 64x64 on load (see VideoHDF5Dataset).
+patch_size: 2
 context_length: 4
-frame_size: 128
-latent_dim: 6
+frame_size: 64
+# Codebook = num_bins**latent_dim = 8**4 = 4096. 4x the old baseline (1024), and
+# critically small enough that the dynamics softmax over the codebook is tractable
+# (the 262k codebook from 6x8 OOMs the dynamics stage). The baseline tokenizer only
+# used ~259 codes in the diagnostic, so 4096 is ample headroom.
+latent_dim: 4
 num_bins: 8
 n_actions: 4
 
-# Global batch for all three stages (overrides each stage config's value).
-# 64 is a safe starting point for the 38M tokenizer at patch4 (4096 tokens/sample)
-# on a 32GB RTX 5090. Ramp toward 96/128 while watching `nvidia-smi`; n_updates is
-# step-based, not epoch-based, so a smaller batch does NOT lengthen training.
-# 350 was tuned for the old 0.15M tokenizer and will OOM at 38M on 32GB.
-batch_size_per_gpu: 64
+# Global batch for all three stages, empirically tuned on a 32GB RTX 5090:
+#   tokenizer (compiled)  B=16 -> 11.3GB
+#   dynamics  (4096 vocab) B=16 -> 16.2GB
+# B=24-32 fits the tokenizer but OOMs dynamics, so 16 is the safe shared value.
+# Training is step-based (n_updates), so a smaller batch does NOT lengthen the run.
+batch_size_per_gpu: 16
 gradient_accumulation_steps: 1
 
 amp: true

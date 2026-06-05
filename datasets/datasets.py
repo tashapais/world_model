@@ -87,6 +87,18 @@ class VideoHDF5Dataset(Dataset):
 
             self.data = frames
 
+        # Cached h5 frames are stored at their preprocess resolution. If the run
+        # requests a different resolution (e.g. a 64x64 patch2 run off the 128x128
+        # cache), downsample once here so __getitem__ stays cheap.
+        if len(self.data):
+            cur_hw = (self.data.shape[1], self.data.shape[2])
+            tgt_hw = (int(self.resize_to[0]), int(self.resize_to[1]))
+            if cur_hw != tgt_hw:
+                th, tw = tgt_hw
+                self.data = np.stack([
+                    cv2.resize(f, (tw, th), interpolation=cv2.INTER_AREA) for f in self.data
+                ])
+
         if not disable_test_split:
             split_idx = int(0.9 * len(self.data))
             self.data = self.data[:split_idx] if train else self.data[split_idx:]

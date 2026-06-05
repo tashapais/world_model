@@ -1,18 +1,23 @@
-# Dynamics model config for patch_size=4 runs.
+# Dynamics model config for the patch2@64 / 4096-codebook runs.
 # n_updates=30000: loss converged ~30k steps in prior ZELDA runs.
-# batch_size reduced from 500 to 128: patch_size=4 gives 4x more tokens per
-# frame (1024 vs 256), so context sequences are 4x longer and need more memory.
+# batch_size_per_gpu is overridden by the training config's global value.
 batch_size_per_gpu: 128
 gradient_accumulation_steps: 1
 n_updates: 30000
-learning_rate: 0.01
+# Lowered from 0.01: that was tuned for the tiny embed_dim=32 model; a 256-dim
+# transformer needs a smaller LR to stay stable under AdamW.
+learning_rate: 0.0005
 log_interval: 1000
 
 use_actions: true
 
-embed_dim: 32
+# Scaled up from embed_dim=32/hidden_dim=128 (12x narrower than the tokenizer).
+# With the codebook now 4096 (not 262k) the output softmax is cheap, so the
+# dynamics model can afford real capacity to predict tokens accurately -- a weak
+# dynamics model produces wrong tokens -> degraded rollouts even with a sharp tokenizer.
+embed_dim: 256
 num_heads: 8
-hidden_dim: 128
+hidden_dim: 1024
 num_blocks: 8
 
 video_tokenizer_path:

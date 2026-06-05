@@ -122,6 +122,12 @@ class VideoTokenizerConfig:
 	# other params
 	fps: Optional[int] = None
 	preload_ratio: Optional[float] = None
+	# Perceptual (LPIPS) loss weight; 0 disables. Adds high-frequency sharpness
+	# that pure smooth_l1 averages away.
+	lpips_weight: float = 0.0
+	lpips_net: str = "vgg"
+	# Conv refiner on the decode head to remove per-patch grid seams.
+	use_conv_refiner: bool = False
 
 	def __post_init__(self) -> None:
 		_validate_amp_fsdp(self.amp, self.distributed)

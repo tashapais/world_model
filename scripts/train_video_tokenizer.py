@@ -38,6 +38,9 @@ def main():
         data_overrides['fps'] = args.fps
     if hasattr(args, 'preload_ratio') and args.preload_ratio is not None:
         data_overrides['preload_ratio'] = args.preload_ratio
+    if hasattr(args, 'frame_size') and args.frame_size is not None:
+        # downsample cached 128x128 frames to the model's frame_size (e.g. 64 for patch2)
+        data_overrides['resolution'] = (args.frame_size, args.frame_size)
     training_data, validation_data, training_loader, validation_loader, x_train_var = load_data_and_data_loaders(
         dataset=args.dataset, 
         batch_size=args.batch_size_per_gpu, 
@@ -61,7 +64,12 @@ def main():
         num_bins=args.num_bins,
         use_rope=getattr(args, 'use_rope', False),
         use_adaln_zero=getattr(args, 'use_adaln_zero', False),
+        lpips_weight=getattr(args, 'lpips_weight', 0.0),
+        lpips_net=getattr(args, 'lpips_net', 'vgg'),
+        use_conv_refiner=getattr(args, 'use_conv_refiner', False),
     ).to(args.device)
+    # instantiate the frozen LPIPS net (no-op if lpips_weight == 0) before compile/DDP
+    model.setup_lpips(args.device)
     if args.checkpoint:
         model, _ = load_videotokenizer_from_checkpoint(
             args.checkpoint, 
@@ -73,7 +81,7 @@ def main():
     # optional DDP, compile, param count, tf32
     print_param_count_if_main(model, "VideoTokenizer", is_main)
     if args.compile:
-        model = torch.compile(model, mode="reduce-overhead", fullgraph=False, dynamic=True)
+        model = torch.compile(model, mode="reduce-overhead", fullgraph=False, dynamic=False)
     model = prepare_model_for_distributed(
         model, 
         args.distributed, 
@@ -124,7 +132,7 @@ def main():
             x = x.to(args.device, non_blocking=True)
 
             with train_ctx:
-                loss, x_hat = model(x)
+                loss, x_hat, logs = model(x)
                 loss /= args.gradient_accumulation_steps
                 if isinstance(model, FSDPModule):
                     if (micro_batch + 1) % args.gradient_accumulation_steps == 0:
@@ -145,6 +153,8 @@ def main():
         if args.use_wandb and is_main:
             metrics = {
                 'loss': loss.item(),
+                'recon_loss': logs['recon'].item(),
+                'lpips_loss': logs['lpips'].item(),
                 'learning_rate': schedulers[0].get_last_lr()[0],
             }
             log_training_metrics(i, metrics, prefix='train')
@@ -173,8 +183,10 @@ def main():
                         break
                     xv = xv.to(args.device, non_blocking=True)
                     with train_ctx:
-                        vloss, _ = model(xv)
-                    val_losses.append(vloss.detach().float())
+                        _, _, vlogs = model(xv)
+                    # log pure smooth_l1 recon so val/loss stays comparable to the
+                    # baseline diagnostic (independent of the lpips weight)
+                    val_losses.append(vlogs['recon'].detach().float())
             unwrap_model(model).train()
             if val_losses and is_main:
                 val_loss = torch.mean(torch.stack(val_losses)).item()

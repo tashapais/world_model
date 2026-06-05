@@ -97,14 +97,16 @@ def load_picodoom(num_frames=4, fps=30, preload_ratio=1):
     )
 
 
-def load_zelda(num_frames=4, fps=15, preload_ratio=1):
+def load_zelda(num_frames=4, fps=15, preload_ratio=1, resolution=(128, 128)):
     return _load_video_dataset_pair(
         ZeldaDataset,
         '/data/Zelda oot2d 1 Cut.mp4',
         '/data/zelda_frames.h5',
         num_frames=num_frames,
         fps=fps,
-        preload_ratio=preload_ratio
+        preload_ratio=preload_ratio,
+        resolution=resolution,  # forwarded to ZeldaDataset; cached 128x128 frames
+                                # are downsampled to this on load (see VideoHDF5Dataset)
     )
 
 
@@ -185,8 +187,10 @@ def load_tokenized_dataset(tokens_path: str, batch_size: int, num_frames: int = 
     return train_data, val_data, train_loader, val_loader
 
 
-def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=False, rank=0, world_size=1, fps=15, preload_ratio=1):
-    if dataset == 'PONG':
+def load_data_and_data_loaders(dataset, batch_size, num_frames=1, distributed=False, rank=0, world_size=1, fps=15, preload_ratio=1, resolution=None):
+    if dataset == 'ZELDA' and resolution is not None:
+        training_data, validation_data = load_zelda(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio, resolution=resolution)
+    elif dataset == 'PONG':
         training_data, validation_data = load_pong(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)
     elif dataset == 'SONIC':
         training_data, validation_data = load_sonic(num_frames=num_frames, fps=fps, preload_ratio=preload_ratio)

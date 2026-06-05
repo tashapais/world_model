@@ -38,6 +38,8 @@ def main():
         data_overrides['fps'] = args.fps
     if hasattr(args, 'preload_ratio') and args.preload_ratio is not None:
         data_overrides['preload_ratio'] = args.preload_ratio
+    if hasattr(args, 'frame_size') and args.frame_size is not None:
+        data_overrides['resolution'] = (args.frame_size, args.frame_size)
     training_data, validation_data, training_loader, validation_loader, x_train_var = load_data_and_data_loaders(
         dataset=args.dataset,
         batch_size=args.batch_size_per_gpu,
@@ -72,7 +74,7 @@ def main():
     # optional DDP, compile, param count, tf32
     print_param_count_if_main(model, "LatentActionModel", is_main)
     if args.compile:
-        model = torch.compile(model, mode="reduce-overhead", fullgraph=False, dynamic=True)
+        model = torch.compile(model, mode="reduce-overhead", fullgraph=False, dynamic=False)
     model = prepare_model_for_distributed(
         model, 
         args.distributed, 
