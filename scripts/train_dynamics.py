@@ -83,6 +83,7 @@ def main():
         moe_aux_loss_coeff=getattr(args, 'moe_aux_loss_coeff', 0.01),
         use_rope=getattr(args, 'use_rope', False),
         use_adaln_zero=getattr(args, 'use_adaln_zero', False),
+        mask_target_frame_only=getattr(args, 'mask_target_frame_only', False),
     ).to(args.device)
     if args.checkpoint:
         dynamics_model, _ = load_dynamics_from_checkpoint(

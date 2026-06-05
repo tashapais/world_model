@@ -10,11 +10,16 @@ class DynamicsModel(nn.Module):
     def __init__(self, frame_size=(128, 128), patch_size=4, embed_dim=128, num_heads=8,
                  hidden_dim=128, num_blocks=4, num_bins=4, n_actions=8, conditioning_dim=3, latent_dim=5,
                  use_moe=False, num_experts=4, top_k_experts=2, moe_aux_loss_coeff=0.01,
-                 use_rope=False, use_adaln_zero=False):
+                 use_rope=False, use_adaln_zero=False, mask_target_frame_only=False):
         super().__init__()
         H, W = frame_size
         codebook_size = num_bins**latent_dim
         self.use_rope = use_rope
+        # Genie-style masking: keep the context frames fully visible and mask only
+        # the last (target) frame, so it must be predicted from context + action.
+        # This forces action dependence and matches the inference setup (context
+        # visible, horizon frame iteratively decoded). Training-only; no weights.
+        self.mask_target_frame_only = mask_target_frame_only
         grid_size = (H // patch_size, W // patch_size)
 
         self.latent_embed = nn.Linear(latent_dim, embed_dim)
@@ -48,13 +53,28 @@ class DynamicsModel(nn.Module):
         # apply MaskGIT random masking during training
         if training and self.training:
             # per-batch mask ratio in [0.5, 1.0)
-            mask_ratio = 0.5 + torch.rand((), device=discrete_latents.device) * 0.5 
-            mask_positions = (torch.rand(B, T, P, device=discrete_latents.device) < mask_ratio) # [B, T, P]
+            mask_ratio = 0.5 + torch.rand((), device=discrete_latents.device) * 0.5
+            if self.mask_target_frame_only:
+                # Genie-style: context frames (0..T-2) stay fully visible; mask a
+                # random subset of ONLY the last frame's tokens. The model must use
+                # the context + last action to predict them, so loss is computed
+                # purely on the action-driven target frame.
+                mask_positions = torch.zeros(B, T, P, dtype=torch.bool, device=discrete_latents.device)
+                last_frame_mask = (torch.rand(B, P, device=discrete_latents.device) < mask_ratio)  # [B, P]
+                # guarantee at least one masked target token per batch element so the
+                # loss denominator is well defined even if a row sampled all-unmasked
+                none_masked = ~last_frame_mask.any(dim=1)  # [B]
+                if none_masked.any():
+                    forced_p = torch.randint(0, P, (int(none_masked.sum()),), device=discrete_latents.device)
+                    last_frame_mask[none_masked, forced_p] = True
+                mask_positions[:, -1, :] = last_frame_mask
+            else:
+                mask_positions = (torch.rand(B, T, P, device=discrete_latents.device) < mask_ratio) # [B, T, P]
 
-            # guarantee at least one unmasked temporal anchor per (B, P)
-            # pick a random timestep for each (B,P) and force it to unmask
-            anchor_idx = torch.randint(0, T, (B, P), device=discrete_latents.device)  # [B, P]
-            mask_positions[torch.arange(B)[:, None], anchor_idx, torch.arange(P)[None, :]] = False # [B, T, P]
+                # guarantee at least one unmasked temporal anchor per (B, P)
+                # pick a random timestep for each (B,P) and force it to unmask
+                anchor_idx = torch.randint(0, T, (B, P), device=discrete_latents.device)  # [B, P]
+                mask_positions[torch.arange(B)[:, None], anchor_idx, torch.arange(P)[None, :]] = False # [B, T, P]
 
             # replace selected latents with mask tokens
             mask_token = repeat(self.mask_token.to(discrete_latents.device, discrete_latents.dtype), '1 1 1 L -> B T P L', B=B, T=T, P=P) # [B, T, P, L]

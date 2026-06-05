@@ -11,6 +11,13 @@ log_interval: 1000
 
 use_actions: true
 
+# Genie-style masking: keep the context frames fully visible and mask only the
+# target (last) frame, so it must be predicted from context + action. This forces
+# the dynamics to actually use the action conditioning (the previous random
+# all-frame masking let it reconstruct the next frame from visible neighbours and
+# largely ignore actions) and aligns training with how inference decodes.
+mask_target_frame_only: true
+
 # Scaled up from embed_dim=32/hidden_dim=128 (12x narrower than the tokenizer).
 # With the codebook now 4096 (not 262k) the output softmax is cheap, so the
 # dynamics model can afford real capacity to predict tokens accurately -- a weak

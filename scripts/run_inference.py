@@ -75,8 +75,14 @@ def main():
     _, _, data_loader, _, _ = load_data_and_data_loaders(
         dataset=args.dataset, batch_size=1, num_frames=frames_to_load, **data_overrides)
 
-    # sample random batch
-    random_idx = random.randint(0, len(data_loader.dataset) - 1)
+    # pick the seed clip: a fixed index if provided (e.g. a clean gameplay clip),
+    # otherwise a random one
+    seed_index = getattr(args, 'seed_index', None)
+    if seed_index is not None and 0 <= seed_index < len(data_loader.dataset):
+        random_idx = seed_index
+    else:
+        random_idx = random.randint(0, len(data_loader.dataset) - 1)
+    print(f"Seed clip index: {random_idx}")
     og_ground_truth_frames = data_loader.dataset[random_idx][0]  # full sequence
     og_ground_truth_frames = og_ground_truth_frames.unsqueeze(0).to(args.device)  # [1, frames_to_load, C, H, W]
 

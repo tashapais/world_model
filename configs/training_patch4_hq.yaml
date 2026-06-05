@@ -22,7 +22,10 @@ frame_size: 128
 # used ~259 codes in the diagnostic, so 4096 is ample headroom.
 latent_dim: 4
 num_bins: 8
-n_actions: 4
+# Bumped 4 -> 8 (action_dim log2(8)=3): a richer action vocabulary so the latent
+# action model can encode more distinct motions, giving the calibrator more
+# distinct codes to bind the 4 arrow directions to.
+n_actions: 8
 
 # Global batch for all three stages, empirically tuned on a 32GB RTX 5090:
 #   tokenizer (compiled)  B=16 -> 11.3GB

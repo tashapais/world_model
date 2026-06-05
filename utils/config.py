@@ -232,6 +232,9 @@ class DynamicsConfig:
 	use_rope: bool = False
 	# AdaLN-Zero
 	use_adaln_zero: bool = False
+	# Genie-style masking: keep context visible, mask only the target frame so it
+	# must be predicted from context + action (forces action dependence)
+	mask_target_frame_only: bool = False
 	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
 	# Optimizer
@@ -347,6 +350,9 @@ class InferenceConfig:
 	preload_ratio: Optional[float] = None
 	# save results to inference_results/<output_subdir>/
 	output_subdir: Optional[str] = None
+	# fixed seed-clip index (None = random). Lets you start the rollout from a
+	# specific, clean gameplay clip instead of a random (possibly text/menu) frame.
+	seed_index: Optional[int] = None
 
 
 def load_config(config_cls, default_config_path: Optional[str] = None):

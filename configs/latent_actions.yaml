@@ -1,15 +1,21 @@
 # Training
+# NOTE: batch_size_per_gpu is overridden by the training config's global value (16).
 batch_size_per_gpu: 350
 gradient_accumulation_steps: 1
-n_updates: 10000
+# Longer than the prior 10k: the action model collapsed to near-identical codes,
+# so it needs more steps (plus the capacity bump below) to learn distinct,
+# informative actions instead of mode-collapsing.
+n_updates: 15000
 learning_rate: 0.0001
 log_interval: 500
 
-# these can vary but for convenience, here
-embed_dim: 32
+# Bumped from 32/128/2: embed_dim=32 is tiny for 1024 patches (patch4@128) and
+# contributed to action collapse. More capacity helps the encoder separate
+# distinct motions into distinct codes.
+embed_dim: 64
 num_heads: 8
-hidden_dim: 128
-num_blocks: 2
+hidden_dim: 256
+num_blocks: 3
 
 # resume from checkpoint
 checkpoint: null
