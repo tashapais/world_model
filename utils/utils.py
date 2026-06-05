@@ -230,6 +230,11 @@ def load_videotokenizer_from_checkpoint(checkpoint_path, device, model = None, i
         'num_blocks': cfg.get('num_blocks', 4),
         'latent_dim': cfg.get('latent_dim', 6),
         'num_bins': cfg.get('num_bins', 4),
+        # architectural toggles must match how the checkpoint was trained, or strict
+        # state_dict loading fails (e.g. the conv refiner adds decoder.frame_head.refiner.*)
+        'use_rope': cfg.get('use_rope', False),
+        'use_adaln_zero': cfg.get('use_adaln_zero', False),
+        'use_conv_refiner': cfg.get('use_conv_refiner', False),
     }
     if model is None:
         model = VideoTokenizer(**kwargs)

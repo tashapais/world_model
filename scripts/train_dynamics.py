@@ -281,7 +281,8 @@ def main():
                     {f'scheduler_{i}': s.state_dict() for i, s in enumerate(schedulers)},
                     pathlib.Path(ckpt_path) / 'all_schedulers.pt',
                 )
-            if is_main:
+            if is_main and args.use_wandb:
+                # masked_frames/predicted_frames are only computed in the use_wandb block above
                 save_path = os.path.join(visualizations_dir, f'dynamics_prediction_step_{i}.png')
                 visualize_reconstruction(masked_frames[:16].cpu(), predicted_frames[:16].cpu(), save_path)
 
