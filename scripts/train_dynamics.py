@@ -54,15 +54,25 @@ def main():
             p.requires_grad = False
     else:
         raise FileNotFoundError(f"Video tokenizer checkpoint not found at {args.video_tokenizer_path}")
-    if os.path.isdir(args.latent_actions_path):
+    # Self-supervised motion labels replace the unsupervised latent action model:
+    # conditioning is a cardinal motion vector (dim 2) computed from the frames.
+    use_motion_labels = getattr(args, 'use_motion_labels', False)
+    if use_motion_labels:
+        from utils.motion_labels import motion_to_cardinal, CONDITIONING_DIM
+        latent_action_model = None
+        conditioning_dim = CONDITIONING_DIM
+        if is_main:
+            print(f"Using self-supervised cardinal motion labels (conditioning_dim={conditioning_dim})")
+    elif os.path.isdir(args.latent_actions_path):
         latent_action_model, latent_action_ckpt = load_latent_actions_from_checkpoint(
-            checkpoint_path=args.latent_actions_path, 
+            checkpoint_path=args.latent_actions_path,
             device=args.device,
             is_distributed=dist_setup['is_distributed'],
         )
         unwrap_model(latent_action_model).eval()
         for p in unwrap_model(latent_action_model).parameters():
             p.requires_grad = False
+        conditioning_dim = unwrap_model(latent_action_model).action_dim
     else:
         raise FileNotFoundError(f"Latent Action Model checkpoint not found at {args.latent_actions_path}")
 
@@ -74,7 +84,7 @@ def main():
         num_heads=args.num_heads,
         hidden_dim=args.hidden_dim,
         num_blocks=args.num_blocks,
-        conditioning_dim=unwrap_model(latent_action_model).action_dim,
+        conditioning_dim=conditioning_dim,
         latent_dim=args.latent_dim,
         num_bins=args.num_bins,
         use_moe=getattr(args, 'use_moe', False),
@@ -97,7 +107,8 @@ def main():
     print_param_count_if_main(dynamics_model, "DynamicsModel", is_main)
     if args.compile:
         video_tokenizer = torch.compile(video_tokenizer, mode="reduce-overhead", fullgraph=False, dynamic=False)
-        latent_action_model = torch.compile(latent_action_model, mode="reduce-overhead", fullgraph=False, dynamic=False)
+        if latent_action_model is not None:
+            latent_action_model = torch.compile(latent_action_model, mode="reduce-overhead", fullgraph=False, dynamic=False)
         dynamics_model = torch.compile(dynamics_model, mode="reduce-overhead", fullgraph=False, dynamic=False)
         print("Compiled all models for training.")
     dynamics_model = prepare_model_for_distributed(
@@ -193,7 +204,9 @@ def main():
                 # x is raw frames [B, T, C, H, W]
                 video_tokens = video_tokenizer.tokenize(x)  # [B, T, P]
                 video_latents = video_tokenizer.quantizer.get_latents_from_indices(video_tokens, dim=-1)  # [B, T, P, L]
-                if args.use_actions:
+                if use_motion_labels:
+                    quantized_actions = motion_to_cardinal(x).to(video_latents.dtype)  # [B, T-1, 2]
+                elif args.use_actions:
                     quantized_actions = latent_action_model.encode(x)  # [B, T - 1, A]
                 else:
                     quantized_actions = None
@@ -241,7 +254,7 @@ def main():
             wandb.log(log_dict, step=i)
             log_system_metrics(i)
             log_learning_rate(optimizers[0], i)
-            if args.use_actions:
+            if args.use_actions and not use_motion_labels:
                 action_indices = latent_action_model.quantizer.get_indices_from_latents(quantized_actions)
                 log_action_distribution(action_indices, i, args.n_actions)
 

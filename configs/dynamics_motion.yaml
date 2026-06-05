@@ -1,0 +1,27 @@
+# Dynamics conditioned on SELF-SUPERVISED cardinal motion labels.
+# Instead of the unsupervised latent action model, each transition is labeled with
+# its measured scroll direction (utils.motion_labels) -> conditioning_dim=2.
+# This is the labeled-action setup that gave 100% control on the synthetic world,
+# applied to Zelda via self-supervision. Tokenizer is reused; no latent_actions.
+batch_size_per_gpu: 128
+gradient_accumulation_steps: 1
+n_updates: 30000
+learning_rate: 0.0005
+log_interval: 1000
+
+use_actions: true
+use_motion_labels: true
+# keep context visible, mask only the target frame so it must be predicted from
+# context + the motion direction (forces the model to use the direction signal)
+mask_target_frame_only: true
+
+embed_dim: 256
+num_heads: 8
+hidden_dim: 1024
+num_blocks: 8
+
+video_tokenizer_path:
+latent_actions_path:
+cached_tokens_path:
+
+checkpoint:

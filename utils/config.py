@@ -235,6 +235,10 @@ class DynamicsConfig:
 	# Genie-style masking: keep context visible, mask only the target frame so it
 	# must be predicted from context + action (forces action dependence)
 	mask_target_frame_only: bool = False
+	# Self-supervised directional control: instead of the unsupervised latent action
+	# model, condition on cardinal motion labels derived from inter-frame scroll
+	# (utils.motion_labels). conditioning_dim becomes 2; no latent_actions needed.
+	use_motion_labels: bool = False
 	# MaskGIT unmasking schedule ("exp", "halton", "cosine")
 	maskgit_schedule: str = "exp"
 	# Optimizer
