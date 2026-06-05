@@ -4,16 +4,18 @@ Seeds the model with a short ground-truth clip, then lets you drive it one frame
 at a time by pressing keys. Each key press picks a latent *action code* and runs a
 single dynamics step conditioned on it, decoding and displaying the next frame.
 
-The action codes are learned unsupervised (FSQ codebook), so the keys map to
-arbitrary codes rather than predefined directions — you discover what each code
-does by playing. Use the number keys / w-a-s-d to probe each code, then steer.
+The action codes are learned unsupervised (FSQ codebook), so the arrow keys map
+to arbitrary codes rather than true directions — pressing up won't necessarily
+move "up". Each arrow drives a consistent learned transition; you discover what
+each does by playing.
 
 Controls (shown in the on-screen HUD):
-    w a s d        -> action codes 0 1 2 3
-    0 1 2 .. N-1   -> action code by number
-    space          -> repeat the last action (advance)
-    r              -> reset to a fresh random ground-truth clip
-    q / ESC        -> quit
+    up down left right  -> action codes 0 1 2 3
+    w a s d             -> same, as a fallback (codes 0 1 2 3)
+    0 1 2 .. N-1        -> action code by number
+    space               -> repeat the last action (advance)
+    r                   -> reset to a fresh random ground-truth clip
+    q / ESC             -> quit
 
 Run:
     python -m scripts.play                       # uses configs/inference_zelda.yaml
@@ -40,9 +42,20 @@ MASKGIT_STEPS = 8
 # upscale the (small) generated frame to roughly this many pixels on the long side
 DISPLAY_LONG_SIDE = 512
 HUD_H = 54  # height of the on-screen text bar
-WINDOW = "world model (press w/a/s/d, 0-9 to act | r reset | q quit)"
+WINDOW = "world model (arrow keys to act | r reset | q quit)"
 
-# physical key -> action code index
+# Arrow keys aren't ASCII, so we read them with cv2.waitKeyEx() (full key code,
+# no 0xFF mask) and match the platform-specific codes below. Requested mapping:
+#   up = 0, down = 1, left = 2, right = 3
+# Codes differ per backend: GTK/Qt on Linux, Cocoa on macOS, Win32 on Windows.
+ARROW_TO_ACTION = {
+    65362: 0, 63232: 0, 2490368: 0,   # up
+    65364: 1, 63233: 1, 2621440: 1,   # down
+    65361: 2, 63234: 2, 2424832: 2,   # left
+    65363: 3, 63235: 3, 2555904: 3,   # right
+}
+
+# w/a/s/d fallback for the same four codes (matched on the ASCII low byte)
 KEY_TO_ACTION = {ord("w"): 0, ord("a"): 1, ord("s"): 2, ord("d"): 3}
 
 
@@ -109,7 +122,7 @@ def render(frame_chw, frame_no, last_action, n_actions) -> np.ndarray:
     act = "-" if last_action is None else str(last_action)
     cv2.putText(hud, f"frame {frame_no}   action {act}/{n_actions - 1}",
                 (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 220, 80), 1, cv2.LINE_AA)
-    cv2.putText(hud, "w/a/s/d & 0-9 = act   space = repeat   r = reset   q = quit",
+    cv2.putText(hud, "arrows = act   space = repeat   r = reset   q = quit",
                 (8, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1, cv2.LINE_AA)
     return np.vstack([hud, big])
 
@@ -177,25 +190,29 @@ def main():
     frame_no = args.context_window
 
     cv2.namedWindow(WINDOW, cv2.WINDOW_AUTOSIZE)
-    print("\nWindow open. Click it, then press keys. (q or ESC to quit)\n")
+    print("\nWindow open. Click it, then press the arrow keys. (q or ESC to quit)\n")
 
     while True:
         cv2.imshow(WINDOW, render(generated[0, -1], frame_no, last_action, n_actions))
-        key = cv2.waitKey(0) & 0xFF
+        # waitKeyEx (not & 0xFF) so arrow / special keys survive; arrows are
+        # matched on the full code, ASCII keys on the low byte.
+        key = cv2.waitKeyEx(0)
+        ascii_key = key & 0xFF
 
-        if key in (ord("q"), 27):  # q or ESC
+        if key in ARROW_TO_ACTION:
+            action = ARROW_TO_ACTION[key]
+        elif ascii_key in (ord("q"), 27):  # q or ESC
             break
-        if key == ord("r"):
+        elif ascii_key == ord("r"):
             context_frames, generated, inferred_actions = new_episode()
             last_action, frame_no = None, args.context_window
             continue
-
-        if key == ord(" "):
+        elif ascii_key == ord(" "):
             action = last_action if last_action is not None else 0
-        elif key in KEY_TO_ACTION:
-            action = KEY_TO_ACTION[key]
-        elif ord("0") <= key <= ord("9"):
-            action = key - ord("0")
+        elif ascii_key in KEY_TO_ACTION:
+            action = KEY_TO_ACTION[ascii_key]
+        elif ord("0") <= ascii_key <= ord("9"):
+            action = ascii_key - ord("0")
         else:
             continue  # ignore unmapped keys
 
