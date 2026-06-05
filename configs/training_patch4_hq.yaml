@@ -9,13 +9,13 @@ preload_ratio: 1.0
 device: CUDA
 
 # key architectural changes vs baseline
-# patch2 @ 64x64: 1024 tokens/frame (same dynamics budget as patch4@128) but each
-# token covers only a 2x2 pixel block -> sharpest per-token reconstruction, which
-# is what the patch-size comparison favored over coarser patches. The 128x128 cache
-# is downsampled to 64x64 on load (see VideoHDF5Dataset).
-patch_size: 2
+# patch4 @ 128x128: full native resolution (128 = the HF dataset ceiling) at the
+# SAME 1024 tokens/frame as patch2@64 -> identical dynamics cost, but 4x the output
+# pixels (fixes the low-res look of the 64x64 run). 16 px/token; LPIPS + conv
+# refiner + the 4096 codebook keep it sharp. No downsample needed (native 128).
+patch_size: 4
 context_length: 4
-frame_size: 64
+frame_size: 128
 # Codebook = num_bins**latent_dim = 8**4 = 4096. 4x the old baseline (1024), and
 # critically small enough that the dynamics softmax over the codebook is tractable
 # (the 262k codebook from 6x8 OOMs the dynamics stage). The baseline tokenizer only
